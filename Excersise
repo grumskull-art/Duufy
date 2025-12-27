@@ -1,0 +1,4 @@
+user = 'Jesper'
+app = 'Python'
+
+print('hello, ' + user + '! Welcome to ' + app + ' programming.')

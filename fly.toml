@@ -1,0 +1,31 @@
+# Fly.io Configuration for Duufy
+# Deploy: flyctl deploy
+
+app = 'duufy-app'
+primary_region = 'ams'  # Amsterdam - closest to Denmark
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true      # Stop when no traffic (saves resources)
+  auto_start_machines = true     # Auto-start on request
+  min_machines_running = 0       # Allow scale to zero (free tier friendly)
+  processes = ['app']
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/health"
+  timeout = "5s"
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '256mb'

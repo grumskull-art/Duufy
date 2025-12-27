@@ -1,0 +1,3771 @@
+﻿# HEYLOBS PROJEKT - KOMPLET KODE
+
+=== main.py ===
+
+from fastapi import FastAPI, Body
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from models import Item
+from datetime import datetime
+from pathlib import Path
+from pydantic import BaseModel
+from typing import Optional
+
+app = FastAPI(title="Hey Lobs API")
+
+# Enable CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/")
+def read_root():
+    """Returner HTML-siden"""
+    return FileResponse(Path(__file__).parent / "index.html")
+
+@app.get("/health")
+def health_check():
+    return {"status": "OK", "time": datetime.utcnow().isoformat()}
+
+# AI Parser endpoint
+class ParseRequest(BaseModel):
+    text: str
+    force_ai: Optional[bool] = False
+
+@app.post("/ai/parse")
+def parse_voice_input(request: ParseRequest):
+    """
+    Parser stemme-input til strukturerede varer.
+    Bruger lokal regex først, Claude AI ved usikkerhed.
+    """
+    from ai_parser import smart_parse
+    
+    result = smart_parse(request.text, request.force_ai)
+    return result
+
+# GRUPPE endpoints
+@app.post("/group/{group_name}")
+def create_group_route(group_name: str, owner_id: str):
+    from database import create_group
+    try:
+        if not owner_id or not owner_id.strip():
+            return {"message": "Fejl: Ugyldigt ejernavn", "status": "error"}
+        
+        if not group_name or not group_name.strip():
+            return {"message": "Fejl: Gruppenavn mangler", "status": "error"}
+        
+        if len(group_name.strip()) < 2:
+            return {"message": "Fejl: Gruppenavn skal være mindst 2 tegn", "status": "error"}
+        
+        group_id = create_group(group_name, owner_id)
+        return {"message": f"Gruppe '{group_name}' oprettet!", "group_id": group_id, "status": "success"}
+    except Exception as e:
+        print(f"Error creating group: {e}")
+        return {"message": "Serverfejl ved oprettelse", "status": "error"}
+
+@app.get("/groups")
+def get_groups_route():
+    from database import get_groups, get_active_groups
+    try:
+        groups = get_groups()
+        active = get_active_groups()
+        return {"groups": groups, "active_groups": active}
+    except Exception as e:
+        print(f"Error getting groups: {e}")
+        return {"groups": [], "active_groups": []}
+
+# MEDLEMMER endpoints
+@app.post("/group/{group_id}/member/{member_name}")
+def add_member_route(group_id: str, member_name: str):
+    from database import add_member_to_group
+    try:
+        if not member_name or not member_name.strip():
+            return {"message": "Medlemsnavn mangler", "status": "error"}
+        
+        if len(member_name.strip()) < 2:
+            return {"message": "Navn skal være mindst 2 tegn", "status": "error"}
+        
+        success = add_member_to_group(group_id, member_name)
+        if success:
+            return {"message": f"{member_name} tilføjet!", "status": "success"}
+        else:
+            return {"message": f"{member_name} er allerede medlem", "status": "info"}
+    except Exception as e:
+        print(f"Error adding member: {e}")
+        return {"message": "Serverfejl ved tilføjelse", "status": "error"}
+
+@app.get("/group/{group_id}/members")
+def get_members_route(group_id: str):
+    from database import get_group_members, get_group_owner
+    try:
+        members = get_group_members(group_id)
+        owner = get_group_owner(group_id)
+        return {"members": members, "count": len(members), "owner": owner}
+    except Exception as e:
+        print(f"Error getting members: {e}")
+        return {"members": [], "count": 0, "owner": None}
+
+@app.delete("/group/{group_id}/member/{member_name}")
+def remove_member_route(group_id: str, member_name: str, owner_check: str = "Grums"):
+    from database import remove_member_from_group, get_group_owner
+    try:
+        group_owner = get_group_owner(group_id)
+        # owner_check kommer fra frontend som den bruger der forsøger at slette
+        if group_owner != owner_check:
+            return {"message": "Kun gruppeejer kan slette medlemmer", "status": "error"}
+        
+        success = remove_member_from_group(group_id, member_name)
+        if success:
+            return {"message": f"{member_name} fjernet!", "status": "success"}
+        else:
+            return {"message": "Fejl ved fjernelse", "status": "error"}
+    except Exception as e:
+        print(f"Error removing member: {e}")
+        return {"message": "Fejl ved fjernelse", "status": "error"}
+
+# AKTIVE GRUPPER endpoints
+@app.post("/active-groups")
+def set_active_groups_route(group_ids: list = Body(...)):
+    from database import set_active_groups
+    try:
+        if len(group_ids) > 3:
+            return {"message": "Max 3 aktive grupper tilladt", "status": "error"}
+        
+        success = set_active_groups(group_ids)
+        if success:
+            return {"message": f"{len(group_ids)} gruppe(r) aktiveret!", "status": "success"}
+        else:
+            return {"message": "Fejl ved aktivering", "status": "error"}
+    except Exception as e:
+        print(f"Error setting active groups: {e}")
+        return {"message": "Fejl", "status": "error"}
+
+@app.get("/active-groups")
+def get_active_groups_route():
+    from database import get_active_groups
+    try:
+        active = get_active_groups()
+        return {"active_groups": active}
+    except Exception as e:
+        print(f"Error getting active groups: {e}")
+        return {"active_groups": []}
+
+@app.delete("/group/{group_id}")
+def delete_group_route(group_id: str):
+    from database import delete_group, set_active_groups, get_active_groups
+    try:
+        success = delete_group(group_id)
+        if success:
+            # Fjern fra aktive grupper automatisk
+            active = get_active_groups()
+            set_active_groups(active)
+            return {"message": "Gruppe slettet!", "status": "success"}
+        else:
+            return {"message": "Gruppe ikke fundet", "status": "error"}
+    except Exception as e:
+        print(f"Error deleting group: {e}")
+        return {"message": "Fejl ved sletning", "status": "error"}
+
+# VARER endpoints
+@app.post("/add_item")
+def add_item_route(item: Item):
+    from database import add_item_to_groups
+    try:
+        if not item.name or not item.name.strip():
+            return {"message": "Varenavn mangler", "item": item.dict()}
+        
+        # Tilføj til aktive grupper
+        success = add_item_to_groups(item.dict())
+        if success:
+            return {"message": "Vare tilføjet!", "item": item.dict()}
+        else:
+            return {"message": "Vælg mindst én aktiv gruppe", "item": item.dict()}
+    except Exception as e:
+        print(f"Error adding item: {e}")
+        return {"message": "Serverfejl ved tilføjelse", "item": item.dict()}
+
+@app.get("/group/{group_id}/items")
+def get_items_route(group_id: str):
+    from database import get_group_items
+    try:
+        items = get_group_items(group_id)
+        return {"items": items, "last_updated": datetime.utcnow().isoformat()}
+    except Exception as e:
+        print(f"Error getting items: {e}")
+        return {"items": [], "last_updated": datetime.utcnow().isoformat()}
+
+@app.delete("/group/{group_id}/item/{item_name}")
+def delete_item_route(group_id: str, item_name: str):
+    from database import delete_item_from_group
+    try:
+        success = delete_item_from_group(group_id, item_name)
+        if success:
+            return {"message": "Vare slettet!", "status": "success"}
+        else:
+            return {"message": "Vare ikke fundet", "status": "error"}
+    except Exception as e:
+        print(f"Error deleting item: {e}")
+        return {"message": "Serverfejl ved sletning", "status": "error"}
+
+@app.patch("/group/{group_id}/item/{item_name}/quantity")
+def update_item_quantity_route(group_id: str, item_name: str, quantity: str = Body(..., embed=True)):
+    from database import update_item_quantity
+    try:
+        success = update_item_quantity(group_id, item_name, quantity)
+        if success:
+            return {"message": "Mængde opdateret!", "status": "success"}
+        else:
+            return {"message": "Vare ikke fundet", "status": "error"}
+    except Exception as e:
+        print(f"Error updating quantity: {e}")
+        return {"message": "Serverfejl ved opdatering", "status": "error"}
+
+
+# ========== INVITATION ENDPOINTS ==========
+
+class InviteRequest(BaseModel):
+    email: str
+    group_id: str
+    group_name: str
+    inviter_name: str
+
+@app.post("/invite/send")
+def send_invitation_route(request: InviteRequest):
+    """Sender en email-invitation til en bruger"""
+    from invitations import create_invitation
+    from fastapi import Request
+    try:
+        # Brug ngrok URL hvis tilgængelig, ellers localhost
+        base_url = "https://unsophomoric-nila-collaterally.ngrok-free.dev"
+        
+        result = create_invitation(
+            group_id=request.group_id,
+            group_name=request.group_name,
+            inviter_name=request.inviter_name,
+            email=request.email,
+            base_url=base_url
+        )
+        return result
+    except Exception as e:
+        print(f"Error sending invitation: {e}")
+        return {"success": False, "message": "Fejl ved afsendelse af invitation"}
+
+@app.get("/invite/{token}")
+def get_invitation_page(token: str):
+    """Viser invitation-siden"""
+    from invitations import get_invitation
+    from fastapi.responses import HTMLResponse
+    
+    invitation = get_invitation(token)
+    
+    if not invitation:
+        html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Ugyldig invitation - Hey Lobs</title>
+            <style>
+                body { font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; }
+                .card { background: white; padding: 40px; border-radius: 20px; text-align: center; max-width: 400px; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }
+                h1 { color: #e74c3c; }
+                a { color: #667eea; }
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h1>❌ Ugyldig invitation</h1>
+                <p>Denne invitation er udløbet eller findes ikke.</p>
+                <p><a href="/">Gå til Hey Lobs</a></p>
+            </div>
+        </body>
+        </html>
+        """
+        return HTMLResponse(content=html)
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Invitation til {invitation['group_name']} - Hey Lobs</title>
+        <style>
+            * {{ box-sizing: border-box; }}
+            body {{ font-family: Arial, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; display: flex; align-items: center; justify-content: center; margin: 0; padding: 20px; }}
+            .card {{ background: white; padding: 40px; border-radius: 20px; text-align: center; max-width: 400px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.2); }}
+            h1 {{ color: #667eea; margin-bottom: 5px; }}
+            .subtitle {{ color: #666; margin-bottom: 20px; }}
+            .group-name {{ font-size: 28px; color: #764ba2; margin: 20px 0; font-weight: bold; }}
+            .inviter {{ color: #888; margin-bottom: 30px; }}
+            input {{ width: 100%; padding: 15px; border: 2px solid #ddd; border-radius: 10px; font-size: 16px; margin-bottom: 15px; }}
+            input:focus {{ border-color: #667eea; outline: none; }}
+            button {{ width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; font-size: 18px; font-weight: bold; cursor: pointer; }}
+            button:hover {{ opacity: 0.9; }}
+            .error {{ color: #e74c3c; margin-top: 10px; }}
+            .success {{ color: #27ae60; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h1>🛒 Hey Lobs</h1>
+            <p class="subtitle">Du er inviteret til en indkøbsgruppe!</p>
+            
+            <p class="group-name">"{invitation['group_name']}"</p>
+            <p class="inviter">Inviteret af {invitation['inviter_name']}</p>
+            
+            <form id="acceptForm">
+                <input type="text" id="userName" placeholder="Dit navn" required minlength="2">
+                <button type="submit">Acceptér invitation</button>
+            </form>
+            <p id="message"></p>
+        </div>
+        
+        <script>
+            document.getElementById('acceptForm').addEventListener('submit', async (e) => {{
+                e.preventDefault();
+                const name = document.getElementById('userName').value.trim();
+                const msg = document.getElementById('message');
+                
+                if (name.length < 2) {{
+                    msg.className = 'error';
+                    msg.textContent = 'Navn skal være mindst 2 tegn';
+                    return;
+                }}
+                
+                try {{
+                    const resp = await fetch('/invite/{token}/accept', {{
+                        method: 'POST',
+                        headers: {{ 'Content-Type': 'application/json' }},
+                        body: JSON.stringify({{ name: name }})
+                    }});
+                    const data = await resp.json();
+                    
+                    if (data.success) {{
+                        msg.className = 'success';
+                        msg.textContent = data.message;
+                        // Gem bruger og redirect
+                        localStorage.setItem('currentUser', name);
+                        localStorage.setItem('lastActiveGroup', data.group_id);
+                        setTimeout(() => window.location.href = '/', 1500);
+                    }} else {{
+                        msg.className = 'error';
+                        msg.textContent = data.message;
+                    }}
+                }} catch (err) {{
+                    msg.className = 'error';
+                    msg.textContent = 'Fejl ved accept af invitation';
+                }}
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html)
+
+class AcceptInviteRequest(BaseModel):
+    name: str
+
+@app.post("/invite/{token}/accept")
+def accept_invitation_route(token: str, request: AcceptInviteRequest):
+    """Accepterer en invitation"""
+    from invitations import accept_invitation
+    try:
+        result = accept_invitation(token, request.name)
+        return result
+    except Exception as e:
+        print(f"Error accepting invitation: {e}")
+        return {"success": False, "message": "Fejl ved accept af invitation"}
+
+@app.get("/group/{group_id}/invitations")
+def get_group_invitations_route(group_id: str):
+    """Henter ventende invitationer for en gruppe"""
+    from invitations import get_pending_invitations
+    try:
+        pending = get_pending_invitations(group_id)
+        return {"invitations": pending, "count": len(pending)}
+    except Exception as e:
+        print(f"Error getting invitations: {e}")
+        return {"invitations": [], "count": 0}
+
+
+=== ai_parser.py ===
+
+"""
+AI-powered parser til indkøbslister
+Bruger lokal regex først, falder tilbage til Claude API ved usikkerhed
+"""
+
+import re
+import os
+from typing import List, Dict, Optional
+
+# Load .env fil
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv ikke installeret, brug miljøvariabler direkte
+
+# Prøv at importere Anthropic (valgfri)
+try:
+    from anthropic import Anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+    print("⚠️ Anthropic ikke installeret - kun lokal parsing tilgængelig")
+
+# Kategorier til varer
+CATEGORIES = {
+    # Mejeri
+    'mælk': 'mejeri', 'letmælk': 'mejeri', 'minimælk': 'mejeri', 'sødmælk': 'mejeri',
+    'smør': 'mejeri', 'ost': 'mejeri', 'fløde': 'mejeri', 'piskefløde': 'mejeri',
+    'yoghurt': 'mejeri', 'skyr': 'mejeri', 'cremefraiche': 'mejeri',
+    # Kød
+    'kylling': 'kød', 'oksekød': 'kød', 'hakket': 'kød', 'hakkekød': 'kød',
+    'svinekød': 'kød', 'bacon': 'kød', 'pølser': 'kød', 'hamburgerryg': 'kød',
+    'rullepølse': 'kød', 'leverpostej': 'kød', 'skinke': 'kød',
+    # Fisk
+    'laks': 'fisk', 'tun': 'fisk', 'torsk': 'fisk', 'rejer': 'fisk',
+    # Brød
+    'brød': 'bager', 'rugbrød': 'bager', 'franskbrød': 'bager', 'boller': 'bager',
+    # Grøntsager
+    'kartofler': 'grønt', 'kartoffel': 'grønt', 'løg': 'grønt', 'hvidløg': 'grønt',
+    'gulerødder': 'grønt', 'gulerod': 'grønt', 'tomater': 'grønt', 'tomat': 'grønt',
+    'agurk': 'grønt', 'salat': 'grønt', 'peberfrugt': 'grønt', 'broccoli': 'grønt',
+    # Frugt
+    'æbler': 'frugt', 'æble': 'frugt', 'bananer': 'frugt', 'banan': 'frugt',
+    'appelsiner': 'frugt', 'appelsin': 'frugt', 'pærer': 'frugt', 'citroner': 'frugt',
+    # Drikkevarer
+    'juice': 'drikkevarer', 'cola': 'drikkevarer', 'sodavand': 'drikkevarer',
+    'øl': 'drikkevarer', 'vin': 'drikkevarer', 'vand': 'drikkevarer',
+    'kaffe': 'drikkevarer', 'te': 'drikkevarer',
+    # Kolonial
+    'pasta': 'kolonial', 'ris': 'kolonial', 'mel': 'kolonial', 'sukker': 'kolonial',
+    'salt': 'kolonial', 'olie': 'kolonial', 'ketchup': 'kolonial', 'sennep': 'kolonial',
+    'mayonnaise': 'kolonial', 'remoulade': 'kolonial',
+    # Husholdning
+    'toiletpapir': 'husholdning', 'køkkenrulle': 'husholdning', 'sæbe': 'husholdning',
+    # Æg
+    'æg': 'æg'
+}
+
+# Standard mængder per kategori/vare
+DEFAULT_QUANTITIES = {
+    'mejeri': '1 L', 'kød': '500 g', 'fisk': '400 g', 'bager': '1 stk',
+    'grønt': '1 stk', 'frugt': '1 stk', 'drikkevarer': '1 L',
+    'kolonial': '1 stk', 'husholdning': '1 pk', 'æg': '10 stk',
+    # Specifikke varer
+    'smør': '250 g', 'ost': '400 g', 'bacon': '1 pk', 'pølser': '1 pk',
+    'kartofler': '1 kg', 'løg': '1 net', 'æbler': '1 kg', 'bananer': '1 bundt',
+    'pasta': '500 g', 'ris': '1 kg', 'mel': '1 kg', 'sukker': '1 kg',
+}
+
+# Mængde-mønster - mere præcist
+AMOUNT_PATTERN = re.compile(
+    r"^(\d+(?:[.,]\d+)?)\s*(l|liter|ml|dl|cl|stk|stykker?|pakke|pakker|pk|poser?|g|gram|kg|kilo|fl|flaske|flasker|ds|dåse|dåser|bundt|net)?\s+",
+    re.IGNORECASE
+)
+
+def get_category(item_name: str) -> str:
+    """Find kategori for en vare"""
+    item_lower = item_name.lower()
+    for key, category in CATEGORIES.items():
+        if key in item_lower:
+            return category
+    return 'andet'
+
+def get_default_quantity(item_name: str) -> str:
+    """Gæt standard mængde for en vare"""
+    item_lower = item_name.lower()
+    
+    # Tjek specifikke varer først
+    for key, qty in DEFAULT_QUANTITIES.items():
+        if key in item_lower:
+            return qty
+    
+    # Ellers brug kategori
+    category = get_category(item_name)
+    return DEFAULT_QUANTITIES.get(category, '1 stk')
+
+def smart_split_by_products(text: str) -> List[str]:
+    """Splitter tekst ved kendte produkter for at adskille varer uden separator"""
+    words = text.strip().split()
+    if len(words) <= 2:
+        return [text]
+    
+    parts = []
+    current_part = []
+    last_product_idx = -1
+    
+    for i, word in enumerate(words):
+        # Check om ordet er et kendt produkt
+        is_product = any(word == p or word.startswith(p) or p.startswith(word) 
+                        for p in CATEGORIES.keys())
+        
+        # Check om næste ord starter en ny mængde
+        next_word = words[i + 1] if i < len(words) - 1 else ''
+        next_is_quantity = bool(re.match(r'^(\d+|en|et|to|tre|fire|fem|halvanden)$', next_word, re.IGNORECASE))
+        next_is_product = any(next_word == p or next_word.startswith(p) or p.startswith(next_word) 
+                              for p in CATEGORIES.keys())
+        
+        current_part.append(word)
+        
+        if is_product:
+            last_product_idx = len(current_part) - 1
+            
+            # Hvis næste ord er mængde eller nyt produkt, afslut denne del
+            if next_is_quantity or (next_is_product and i < len(words) - 1):
+                parts.append(' '.join(current_part))
+                current_part = []
+                last_product_idx = -1
+    
+    # Tilføj resterende ord
+    if current_part:
+        parts.append(' '.join(current_part))
+    
+    return parts if parts else [text]
+
+def local_parse(text: str) -> List[Dict]:
+    """Parser tekst med regex - hurtig lokal parsing"""
+    text = text.lower().strip()
+    
+    # Fjern fyldord fra starten - MEGET mere omfattende
+    fillers = [
+        r"^(øh|ehm|øhm|nå|nåh|altså|ikke|jo|bare)\s+",
+        r"^(jeg skal have|vi skal have|skal have|jeg skal|vi skal)\s+",
+        r"^(jeg|vi|man|den|det|de|der|den der|det der|de der)\s+",
+        r"^(skal have|skal bruge|skal købe|mangler|vi mangler)\s+",
+        r"^(noget|lidt|lidt af|lidt af det|nogen|nogle)\s+",
+        r"^(tilføj|køb|hent|tag|skriv|sæt)\s+",
+        r"^(en|et|den|det)\s+(?!liter|kilo|kg|l\s)",  # Men ikke før enheder
+    ]
+    
+    # Kør fyldords-fjernelse flere gange for at fange alle
+    for _ in range(3):  # Max 3 iterationer
+        old_text = text
+        for filler in fillers:
+            text = re.sub(filler, "", text, flags=re.IGNORECASE)
+        if text == old_text:  # Ingen ændringer mere
+            break
+    
+    # Split på eksplicitte separatorer
+    parts = re.split(r"\s+og\s+|\s*,\s*|\s+samt\s+|\s+plus\s+", text)
+    
+    # For hver del, prøv at splitte på kendte produkter
+    all_parts = []
+    for part in parts:
+        all_parts.extend(smart_split_by_products(part))
+    
+    parsed_items = []
+    
+    for part in all_parts:
+        part = part.strip()
+        if not part or len(part) < 2:
+            continue
+        
+        item_name = part
+        quantity = ""
+        
+        # Prøv specielle mønstre først
+        
+        # "halvanden liter/kilo X"
+        halvanden_match = re.match(r"^(halvanden|halvandet)\s+(liter|l|kilo|kg)\s+(.+)$", part, re.IGNORECASE)
+        if halvanden_match:
+            unit = halvanden_match.group(2)
+            item_name = halvanden_match.group(3).strip()
+            unit_norm = "L" if unit.lower() in ['l', 'liter'] else "kg"
+            quantity = f"1.5 {unit_norm}"
+        
+        # "en/et liter/kilo X"
+        elif re.match(r"^(en|et)\s+(liter|l|kilo|kg|halv|halvt)\s+", part, re.IGNORECASE):
+            unit_match = re.match(r"^(en|et)\s+(liter|l|kilo|kg|halv|halvt)\s+(.+)$", part, re.IGNORECASE)
+            if unit_match:
+                unit_word = unit_match.group(2).lower()
+                item_name = unit_match.group(3).strip()
+                
+                if unit_word in ['liter', 'l']:
+                    quantity = "1 L"
+                elif unit_word in ['kilo', 'kg']:
+                    quantity = "1 kg"
+                elif unit_word in ['halv', 'halvt']:
+                    quantity = "0.5"
+        
+        # "X l/liter/kg/stk Y"
+        elif re.match(r"^\d", part):
+            amount_match = AMOUNT_PATTERN.match(part)
+            if amount_match:
+                num = amount_match.group(1)
+                unit = amount_match.group(2) or "stk"
+                # Normaliser enhed
+                unit_lower = unit.lower()
+                if unit_lower in ['l', 'liter']:
+                    unit = 'L'
+                elif unit_lower in ['kg', 'kilo']:
+                    unit = 'kg'
+                elif unit_lower in ['g', 'gram']:
+                    unit = 'g'
+                    
+                quantity = f"{num} {unit}"
+                # Resten er item_name
+                item_name = part[amount_match.end():].strip()
+        
+        # Ryd GRUNDIGT op i item_name - fjern alle fyldord
+        item_name = re.sub(r"^(en|et|den|det|noget|nogen|nogle|lidt|den der|det der)\s+", "", item_name, flags=re.IGNORECASE)
+        item_name = re.sub(r"^(den|det|der)\s+", "", item_name, flags=re.IGNORECASE)
+        item_name = item_name.strip()
+        
+        if not item_name:
+            continue
+        
+        # Sæt default mængde hvis ikke fundet
+        if not quantity:
+            quantity = get_default_quantity(item_name)
+        
+        # Find kategori
+        category = get_category(item_name)
+        
+        parsed_items.append({
+            "item": item_name.capitalize(),
+            "quantity": quantity,
+            "category": category
+        })
+    
+    return parsed_items
+
+def opus_parse(text: str) -> List[Dict]:
+    """Parser tekst med Claude API - for komplekse sætninger"""
+    if not ANTHROPIC_AVAILABLE:
+        return []
+    
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("⚠️ ANTHROPIC_API_KEY ikke sat")
+        return []
+    
+    try:
+        client = Anthropic(api_key=api_key)
+        
+        prompt = f"""Du er en intelligent dansk indkøbsassistent. Brugeren taler naturligt og du skal KUN ekstrahere produktnavne.
+
+VIGTIGT:
+- Fjern ALLE fyldord: "jeg skal have", "vi mangler", "den der", "noget", "lidt", osv.
+- Fjern samtale-ord: "øh", "altså", "ikke", "jo", osv.
+- Find KUN produktnavnet og mængden hvis nævnt
+- Brug logisk gæt ved manglende mængde
+
+Eksempler:
+"jeg skal have den der sødmælk" → "Sødmælk"
+"vi mangler noget rugbrød" → "Rugbrød"
+"skal have øh tre kilo kartofler" → "Kartofler" (3 kg)
+"den der remoulade" → "Remoulade"
+
+Kategorier: mejeri, kød, fisk, bager, grønt, frugt, drikkevarer, kolonial, husholdning, æg, andet
+
+Returnér KUN gyldigt JSON array:
+[
+  {{"item": "Sødmælk", "quantity": "1 L", "category": "mejeri"}}
+]
+
+Brugerens tale:
+"{text}"
+"""
+        
+        response = client.messages.create(
+            model="claude-3-haiku-20240307",  # Hurtig og billig
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        
+        result_text = response.content[0].text.strip()
+        
+        # Prøv at parse JSON
+        import json
+        # Fjern eventuelle markdown code blocks
+        if result_text.startswith("```"):
+            result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
+            result_text = re.sub(r"\n?```$", "", result_text)
+        
+        return json.loads(result_text)
+        
+    except Exception as e:
+        print(f"⚠️ Claude API fejl: {e}")
+        return []
+
+def smart_parse(text: str, force_ai: bool = False) -> Dict:
+    """
+    Smart parser - prøver lokal først, bruger AI ved usikkerhed
+    
+    Returns:
+        Dict med 'items' (liste), 'method' ('local' eller 'ai'), og 'confidence'
+    """
+    # Prøv lokal parsing først
+    local_result = local_parse(text)
+    
+    # Heuristik: Er vi sikre på resultatet?
+    all_unknown = all(item["category"] == "andet" for item in local_result) if local_result else True
+    short_input = len(text.split()) <= 2
+    has_items = len(local_result) > 0
+    
+    confidence = "high"
+    if all_unknown and has_items:
+        confidence = "low"
+    elif not has_items:
+        confidence = "none"
+    
+    # Brug AI hvis vi er usikre eller force_ai er True
+    use_ai = force_ai or (confidence == "low" and ANTHROPIC_AVAILABLE)
+    
+    if use_ai and not short_input:
+        ai_result = opus_parse(text)
+        if ai_result:
+            return {
+                "items": ai_result,
+                "method": "ai",
+                "confidence": "high",
+                "original_text": text
+            }
+    
+    # Returner lokal resultat
+    return {
+        "items": local_result,
+        "method": "local",
+        "confidence": confidence,
+        "original_text": text
+    }
+
+# Test
+if __name__ == "__main__":
+    test_phrases = [
+        "2 liter mælk",
+        "vi mangler mælk og brød",
+        "et kilo kartofler hamburgerryg og remoulade",
+        "halvanden liter mælk og 3 bananer",
+        "skal have noget kaffe og toiletpapir"
+    ]
+    
+    for phrase in test_phrases:
+        result = smart_parse(phrase)
+        print(f"\n'{phrase}':")
+        print(f"  Method: {result['method']}, Confidence: {result['confidence']}")
+        for item in result['items']:
+            print(f"  - {item['item']}: {item['quantity']} ({item['category']})")
+
+
+=== invitations.py ===
+
+"""
+Invitation system for Hey Lobs
+Håndterer email-invitationer til grupper
+"""
+
+import json
+import secrets
+import os
+from datetime import datetime, timedelta
+from pathlib import Path
+
+# Prøv at importere resend, men lad det fejle gracefully
+try:
+    import resend
+    RESEND_AVAILABLE = True
+except ImportError:
+    RESEND_AVAILABLE = False
+
+# Load environment variables
+from dotenv import load_dotenv
+load_dotenv()
+
+DATA_DIR = Path(__file__).parent / "data"
+INVITATIONS_FILE = DATA_DIR / "invitations.json"
+USERS_FILE = DATA_DIR / "users.json"
+
+# Resend API key
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+
+def load_invitations():
+    """Loader alle invitationer fra JSON-fil"""
+    if not INVITATIONS_FILE.exists():
+        return {"invitations": {}}
+    try:
+        with open(INVITATIONS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"invitations": {}}
+
+def save_invitations(data):
+    """Gemmer invitationer til JSON-fil"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(INVITATIONS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def load_users():
+    """Loader alle brugere fra JSON-fil"""
+    if not USERS_FILE.exists():
+        return {"users": {}}
+    try:
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except:
+        return {"users": {}}
+
+def save_users(data):
+    """Gemmer brugere til JSON-fil"""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with open(USERS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def generate_invite_token():
+    """Genererer en unik invitation-token"""
+    return secrets.token_urlsafe(16)
+
+def create_invitation(group_id: str, group_name: str, inviter_name: str, email: str, base_url: str):
+    """
+    Opretter en invitation og sender email
+    Returns: dict med status og token
+    """
+    token = generate_invite_token()
+    
+    data = load_invitations()
+    
+    # Tjek om email allerede er inviteret til denne gruppe
+    for inv_token, inv in data["invitations"].items():
+        if inv["email"].lower() == email.lower() and inv["group_id"] == group_id:
+            if inv["status"] == "pending":
+                return {
+                    "success": False, 
+                    "message": f"{email} er allerede inviteret til denne gruppe",
+                    "token": inv_token
+                }
+    
+    # Opret invitation
+    invitation = {
+        "token": token,
+        "group_id": group_id,
+        "group_name": group_name,
+        "inviter_name": inviter_name,
+        "email": email.lower(),
+        "created": datetime.utcnow().isoformat(),
+        "expires": (datetime.utcnow() + timedelta(days=7)).isoformat(),
+        "status": "pending"  # pending, accepted, expired
+    }
+    
+    data["invitations"][token] = invitation
+    save_invitations(data)
+    
+    # Send email
+    invite_url = f"{base_url}/invite/{token}"
+    email_sent = send_invitation_email(email, inviter_name, group_name, invite_url)
+    
+    return {
+        "success": True,
+        "message": f"Invitation sendt til {email}!" if email_sent else f"Invitation oprettet (email kunne ikke sendes)",
+        "token": token,
+        "invite_url": invite_url,
+        "email_sent": email_sent
+    }
+
+def send_invitation_email(to_email: str, inviter_name: str, group_name: str, invite_url: str):
+    """Sender invitation-email via Resend"""
+    
+    if not RESEND_AVAILABLE or not RESEND_API_KEY:
+        print(f"Email ville være sendt til {to_email}: {invite_url}")
+        return False
+    
+    try:
+        resend.api_key = RESEND_API_KEY
+        
+        html_content = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
+            <h1 style="color: #667eea; text-align: center;">🛒 Hey Lobs</h1>
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 15px; color: white; text-align: center;">
+                <h2 style="margin: 0 0 10px 0;">Du er inviteret!</h2>
+                <p style="margin: 0; font-size: 18px;">
+                    <strong>{inviter_name}</strong> vil have dig med i indkøbsgruppen
+                </p>
+                <p style="font-size: 24px; margin: 15px 0;">
+                    <strong>"{group_name}"</strong>
+                </p>
+            </div>
+            <div style="text-align: center; margin-top: 25px;">
+                <a href="{invite_url}" 
+                   style="display: inline-block; 
+                          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                          color: white; 
+                          padding: 15px 40px; 
+                          text-decoration: none; 
+                          border-radius: 25px; 
+                          font-size: 18px;
+                          font-weight: bold;">
+                    Acceptér invitation
+                </a>
+            </div>
+            <p style="text-align: center; color: #666; margin-top: 20px; font-size: 14px;">
+                Linket udløber om 7 dage
+            </p>
+        </div>
+        """
+        
+        resend.Emails.send({
+            "from": "Hey Lobs <noreply@resend.dev>",
+            "to": to_email,
+            "subject": f"🛒 {inviter_name} inviterer dig til {group_name} - Hey Lobs",
+            "html": html_content
+        })
+        
+        return True
+        
+    except Exception as e:
+        print(f"Email fejl: {e}")
+        return False
+
+def get_invitation(token: str):
+    """Henter en invitation fra token"""
+    data = load_invitations()
+    invitation = data["invitations"].get(token)
+    
+    if not invitation:
+        return None
+    
+    # Tjek om udløbet
+    expires = datetime.fromisoformat(invitation["expires"])
+    if datetime.utcnow() > expires:
+        invitation["status"] = "expired"
+        save_invitations(data)
+        return None
+    
+    return invitation
+
+def accept_invitation(token: str, user_name: str):
+    """
+    Accepterer en invitation og tilføjer bruger til gruppen
+    """
+    from database import add_member_to_group
+    
+    data = load_invitations()
+    invitation = data["invitations"].get(token)
+    
+    if not invitation:
+        return {"success": False, "message": "Invitation ikke fundet"}
+    
+    if invitation["status"] != "pending":
+        return {"success": False, "message": "Invitation er allerede brugt eller udløbet"}
+    
+    # Tjek udløb
+    expires = datetime.fromisoformat(invitation["expires"])
+    if datetime.utcnow() > expires:
+        invitation["status"] = "expired"
+        save_invitations(data)
+        return {"success": False, "message": "Invitation er udløbet"}
+    
+    # Tilføj bruger til gruppe
+    success = add_member_to_group(invitation["group_id"], user_name)
+    
+    if success:
+        # Marker invitation som accepteret
+        invitation["status"] = "accepted"
+        invitation["accepted_by"] = user_name
+        invitation["accepted_at"] = datetime.utcnow().isoformat()
+        save_invitations(data)
+        
+        # Opret/opdater bruger
+        users_data = load_users()
+        email = invitation["email"]
+        if email not in users_data["users"]:
+            users_data["users"][email] = {
+                "name": user_name,
+                "email": email,
+                "created": datetime.utcnow().isoformat(),
+                "groups": [invitation["group_id"]]
+            }
+        else:
+            if invitation["group_id"] not in users_data["users"][email].get("groups", []):
+                users_data["users"][email].setdefault("groups", []).append(invitation["group_id"])
+        save_users(users_data)
+        
+        return {
+            "success": True, 
+            "message": f"Velkommen til {invitation['group_name']}!",
+            "group_id": invitation["group_id"],
+            "group_name": invitation["group_name"]
+        }
+    else:
+        return {"success": False, "message": "Kunne ikke tilføje til gruppen - du er måske allerede medlem"}
+
+def get_pending_invitations(group_id: str):
+    """Henter alle ventende invitationer for en gruppe"""
+    data = load_invitations()
+    pending = []
+    
+    for token, inv in data["invitations"].items():
+        if inv["group_id"] == group_id and inv["status"] == "pending":
+            # Tjek udløb
+            expires = datetime.fromisoformat(inv["expires"])
+            if datetime.utcnow() <= expires:
+                pending.append({
+                    "email": inv["email"],
+                    "created": inv["created"],
+                    "token": token
+                })
+    
+    return pending
+
+
+=== index.html ===
+
+<!DOCTYPE html>
+<html lang="da">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hey Lobs 🛒</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .groups-section {
+            background: white;
+            border-bottom: 1px solid #eee;
+        }
+
+        .groups-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .groups-header h2 {
+            font-size: 14px;
+            margin: 0;
+        }
+
+        .groups-list {
+            padding: 10px 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .group-button {
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            position: relative;
+            /* Forhindre tekst-selektion ved long-press */
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+            /* Fjern blå tap highlight */
+            -webkit-tap-highlight-color: transparent;
+            outline: none;
+        }
+
+        .group-button.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .group-button:hover {
+            border-color: #667eea;
+        }
+
+        /* Long-press delete progress */
+        .group-button {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .group-button::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            width: 0;
+            background: #ef4444;
+            transition: none;
+        }
+
+        .group-button.holding::after {
+            width: 100%;
+            transition: width 2s linear;
+        }
+
+        .group-button.deleting {
+            animation: shake 0.3s ease;
+            background: #fee2e2 !important;
+            border-color: #ef4444 !important;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-4px); }
+            75% { transform: translateX(4px); }
+        }
+
+        .new-group-form {
+            padding: 10px 20px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 8px;
+        }
+
+        .new-group-form input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+
+        .new-group-form button {
+            padding: 8px 12px;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            border-radius: 10px;
+            width: auto;
+            font-weight: 600;
+        }
+
+        .form-section {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+            background: #f9f9f9;
+        }
+
+        .form-group {
+            margin-bottom: 12px;
+        }
+
+        label {
+            display: block;
+            font-size: 12px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .input-wrapper input {
+            flex: 1;
+        }
+
+        .mic-btn {
+            padding: 12px !important;
+            flex: 0 0 auto !important;
+            width: 48px !important;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none !important;
+            border-radius: 10px !important;
+            cursor: pointer;
+            font-size: 20px;
+            transition: all 0.2s;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        .mic-btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .mic-btn.listening {
+            animation: pulse 1s infinite;
+            background: linear-gradient(135deg, #00c853 0%, #00e676 100%);
+            box-shadow: 0 0 20px rgba(0, 200, 83, 0.5);
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        /* Flydende mikrofon-knap i bunden */
+        .floating-mic {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            font-size: 32px;
+            cursor: pointer;
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: all 0.2s;
+        }
+        
+        .floating-mic:active {
+            transform: scale(0.95);
+        }
+        
+        .floating-mic.listening {
+            animation: floatPulse 1s infinite;
+            background: linear-gradient(135deg, #00c853 0%, #00e676 100%);
+            box-shadow: 0 0 30px rgba(0, 200, 83, 0.6);
+            width: 90px;
+            height: 90px;
+            bottom: 20px;
+            right: 20px;
+        }
+        
+        @keyframes floatPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(0, 200, 83, 0.6); }
+            50% { transform: scale(1.05); box-shadow: 0 0 50px rgba(0, 200, 83, 0.8); }
+        }
+        
+        .floating-mic-label {
+            position: fixed;
+            bottom: 110px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s;
+            pointer-events: none;
+        }
+        
+        .floating-mic.listening + .floating-mic-label {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-add {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-add:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-sync {
+            background: #f0f0f0;
+            color: #333;
+            flex: 0 0 auto;
+        }
+
+        .members-section {
+            padding: 15px 20px;
+            background: #f5f5f5;
+            border-top: 1px solid #eee;
+        }
+
+        .members-section h3 {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .members-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .member-badge {
+            background: white;
+            padding: 6px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            border: 1px solid #ddd;
+        }
+
+        .member-input-group {
+            display: flex;
+            gap: 8px;
+        }
+
+        .member-input-group input {
+            flex: 1;
+            padding: 8px 12px !important;
+            font-size: 13px !important;
+        }
+
+        .member-input-group button {
+            padding: 8px 12px !important;
+            font-size: 12px !important;
+            width: auto !important;
+            flex: 0 0 auto;
+        }
+
+        .pending-invites {
+            margin-top: 10px;
+            padding: 8px;
+            background: #fff9e6;
+            border-radius: 8px;
+            font-size: 12px;
+        }
+
+        .pending-invites:empty {
+            display: none;
+        }
+
+        .pending-invite {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 0;
+            color: #666;
+        }
+
+        .pending-invite .email {
+            flex: 1;
+        }
+
+        .pending-invite .status {
+            color: #f39c12;
+            font-size: 11px;
+        }
+
+        .items-section {
+            padding: 20px;
+        }
+
+        .items-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .items-header h2 {
+            font-size: 16px;
+            margin: 0;
+        }
+
+        .item-count {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .items-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .item {
+            background: #f9f9f9;
+            padding: 8px;
+            border-radius: 8px;
+            border-left: 3px solid #667eea;
+            animation: slideIn 0.2s ease-out;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: all 0.3s ease;
+        }
+
+        .item.flash {
+            animation: flashPulse 0.6s ease-out;
+            border-left-color: #10b981;
+        }
+
+        @keyframes flashPulse {
+            0% { background: #f9f9f9; transform: scale(1); }
+            25% { background: #d1fae5; transform: scale(1.02); }
+            50% { background: #10b981; transform: scale(1.03); box-shadow: 0 0 20px rgba(16, 185, 129, 0.4); }
+            75% { background: #d1fae5; transform: scale(1.02); }
+            100% { background: #f9f9f9; transform: scale(1); }
+        }
+
+        .item-content {
+            flex: 1;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Swipe container */
+        .item {
+            position: relative;
+            overflow: hidden;
+            touch-action: pan-y;
+            user-select: none;
+        }
+
+        .item-inner {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f9f9f9;
+            position: relative;
+            z-index: 2;
+            transition: transform 0.2s ease;
+            padding: 8px 10px;
+        }
+
+        .swipe-bg {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            font-weight: bold;
+            z-index: 1;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .swipe-bg-left {
+            left: 0;
+            background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+            color: white;
+            justify-content: flex-start;
+        }
+
+        .swipe-bg-right {
+            right: 0;
+            background: linear-gradient(90deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            justify-content: flex-end;
+        }
+
+        .swipe-bg-right.hold-active {
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+        }
+
+        .item.swiping-left .swipe-bg-left {
+            opacity: 1;
+        }
+
+        .item.swiping-right .swipe-bg-right {
+            opacity: 1;
+        }
+
+        .item.bought .item-inner {
+            background: #e8e8e8;
+        }
+
+        .item.bought .item-name {
+            text-decoration: line-through;
+            color: #999;
+        }
+
+        .item.bought .item-info {
+            opacity: 0.5;
+        }
+
+        .item.deleting {
+            animation: deleteSlide 0.3s ease forwards;
+        }
+
+        @keyframes deleteSlide {
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+                height: 0;
+                padding: 0;
+                margin: 0;
+            }
+        }
+
+        /* Undo-sletning styling */
+        .item.pending-delete {
+            opacity: 0.4;
+            background: #fee;
+            border-left-color: #ef4444;
+            pointer-events: auto;
+            cursor: pointer;
+        }
+
+        .item.pending-delete .item-inner {
+            background: #fee;
+        }
+
+        .item.pending-delete .item-name::after {
+            content: ' (tryk for at fortryde)';
+            font-size: 10px;
+            font-weight: normal;
+            color: #ef4444;
+        }
+
+        .item.fade-out {
+            animation: fadeOutShrink 0.5s ease forwards;
+        }
+
+        @keyframes fadeOutShrink {
+            0% { opacity: 0.4; max-height: 60px; }
+            100% { opacity: 0; max-height: 0; padding: 0; margin: 0; overflow: hidden; }
+        }
+
+        .swipe-hint {
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+            padding: 10px;
+            display: none;
+        }
+
+        @media (pointer: coarse) {
+            .swipe-hint {
+                display: block;
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .item-name {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 2px;
+        }
+
+        .item-info {
+            font-size: 11px;
+            color: #999;
+            display: flex;
+            gap: 10px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .emoji {
+            font-size: 40px;
+            margin-bottom: 10px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 3px solid #f0f0f0;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Toast notification - fixed position, ingen layout shift */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .toast {
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-weight: 500;
+            font-size: 14px;
+            opacity: 0;
+            transform: translateY(-20px);
+            transition: all 0.3s ease;
+            pointer-events: auto;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success {
+            background: #10b981;
+            color: white;
+        }
+
+        .toast.error {
+            background: #ef4444;
+            color: white;
+        }
+
+        .login-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .login-modal.active {
+            display: flex;
+        }
+
+        .login-content {
+            background: white;
+            padding: 40px 30px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+        }
+
+        .login-content h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .login-content p {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .login-content input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 16px;
+            margin-bottom: 20px;
+            font-family: inherit;
+        }
+
+        .login-content input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .login-content button {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .login-content button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3);
+        }
+
+        .user-display {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #667eea;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 100;
+            cursor: pointer;
+        }
+
+        .user-display:hover {
+            background: #764ba2;
+        }
+
+        /* Mængde-modal */
+        .quantity-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .quantity-modal.active {
+            display: flex;
+        }
+
+        .quantity-content {
+            background: white;
+            padding: 30px;
+            border-radius: 20px;
+            text-align: center;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 320px;
+            width: 90%;
+        }
+
+        .quantity-content h3 {
+            margin: 0 0 20px 0;
+            color: #333;
+        }
+
+        .quantity-content input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            font-size: 18px;
+            text-align: center;
+            font-family: inherit;
+            margin-bottom: 20px;
+        }
+
+        .quantity-content input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .quantity-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .quantity-buttons button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .quantity-buttons .cancel-btn {
+            background: #e0e0e0;
+            color: #666;
+        }
+
+        .quantity-buttons .save-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-modal" id="loginModal">
+        <div class="login-content">
+            <h1>Hey Lobs 🛒</h1>
+            <p>Hvad er dit kaldenavn?</p>
+            <input type="text" id="loginInput" placeholder="Fx. Grums" autofocus maxlength="20">
+            <button onclick="setUserName()">Start</button>
+        </div>
+    </div>
+
+    <!-- Mængde-modal -->
+    <div class="quantity-modal" id="quantityModal">
+        <div class="quantity-content">
+            <h3 id="quantityItemName">Ændre mængde</h3>
+            <input type="text" id="quantityInput" placeholder="Fx. 2 stk" maxlength="20">
+            <div class="quantity-buttons">
+                <button class="cancel-btn" onclick="closeQuantityModal()">Annuller</button>
+                <button class="save-btn" onclick="saveQuantity()">Gem</button>
+            </div>
+        </div>
+    </div>
+    </div>
+
+    <div class="user-display" id="userDisplay" title="Klik for at skifte navn"></div>
+
+    <div class="container">
+        <div class="header">
+            <h1>Hey Lobs 🛒</h1>
+            <p>Multi-gruppe indkøbsliste</p>
+        </div>
+
+        <div class="groups-section">
+            <div class="groups-header">
+                <h2>👥 Grupper</h2>
+                <span id="activeGroupCount">0 aktive</span>
+            </div>
+            <div class="groups-list" id="groupsList"></div>
+            <div class="new-group-form">
+                <input type="text" id="newGroupInput" placeholder="Ny gruppe..." maxlength="15" onkeypress="if(event.key==='Enter') createNewGroup()">
+                <button onclick="createNewGroup()" class="btn-add">➕</button>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <div id="toast-container" class="toast-container">
+                <div id="toast" class="toast"></div>
+            </div>
+            
+            <form id="itemForm">
+                <div class="form-group">
+                    <label>Vare</label>
+                    <div class="input-wrapper">
+                        <input type="text" id="itemName" placeholder="fx. Øko mælk" required>
+                        <button type="button" id="micBtn" class="mic-btn" title="Hold for at tale">🎤</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Mængde</label>
+                    <input type="text" id="itemQuantity" placeholder="fx. 1 liter" value="1">
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" class="btn-add">Tilføj vare</button>
+                    <button type="button" class="btn-sync" onclick="loadCurrentGroup()">🔄</button>
+                </div>
+            </form>
+
+            <div class="members-section" id="membersSection">
+                <h3>👥 Medlemmer</h3>
+                <div class="members-list" id="membersList"></div>
+                <div class="member-input-group">
+                    <input type="email" id="memberInput" placeholder="Email på nyt medlem" onkeypress="handleMemberKeypress(event)">
+                    <button type="button" onclick="inviteMember()" class="btn-add">📧 Invitér</button>
+                </div>
+                <div id="pendingInvites" class="pending-invites"></div>
+            </div>
+        </div>
+
+        <div class="items-section">
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Indlæser...</p>
+            </div>
+
+            <div class="items-header">
+                <h2>Varer</h2>
+                <span class="item-count" id="itemCount">0</span>
+            </div>
+    
+    <!-- Flydende mikrofon-knap -->
+    <button type="button" id="floatingMic" class="floating-mic" title="Hold for at tale">🎤</button>
+    <div class="floating-mic-label" id="floatingMicLabel">🎤 Taler...</div>
+
+            <div class="items-list" id="itemsList">
+                <div class="empty-state">
+                    <div class="emoji">📋</div>
+                    <p>Vælg en gruppe først</p>
+                    <p style="font-size: 12px;">Klik på en gruppe øverst for at begynde</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Brug samme host som browseren (virker på både PC og telefon)
+        const API_URL = `${window.location.protocol}//${window.location.host}`;
+        let currentGroup = null;
+        let activeGroups = [];
+        let currentUser = null;
+        
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+        let recognitionActive = false; // Flag til at tracke om recognition faktisk kører
+        
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.lang = 'da-DK';
+            recognition.continuous = true; // Continuous for bedre optagelse
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 3; // Få flere alternativer for bedre genkendelse
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const savedName = localStorage.getItem('currentUserName');
+            if (savedName) {
+                currentUser = savedName;
+                initializeApp();
+            } else {
+                // Vis login modal
+                document.getElementById('loginModal').classList.add('active');
+                document.getElementById('loginInput').focus();
+            }
+        });
+
+        function setUserName() {
+            const input = document.getElementById('loginInput');
+            const name = input.value.trim();
+            
+            if (!name) {
+                alert('Skriv dit kaldenavn');
+                return;
+            }
+            
+            localStorage.setItem('currentUserName', name);
+            currentUser = name;
+            document.getElementById('loginModal').classList.remove('active');
+            initializeApp();
+        }
+
+        function initializeApp() {
+            document.getElementById('userDisplay').textContent = `👤 ${currentUser}`;
+            document.getElementById('userDisplay').onclick = changeUserName;
+            loadGroups();
+            initMicButton();
+            requestMicrophonePermission();
+        }
+        
+        // Bed om mikrofon-tilladelse ved opstart
+        async function requestMicrophonePermission() {
+            try {
+                // Prøv at få mikrofon-tilladelse
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                
+                // Tilladelse givet - stop stream men behold tilladelsen
+                stream.getTracks().forEach(track => track.stop());
+                
+                console.log('✅ Mikrofon-tilladelse givet');
+                
+                // Vis besked kun hvis det lykkedes
+                const micBtn = document.getElementById('micBtn');
+                if (micBtn) {
+                    micBtn.style.boxShadow = '0 0 10px rgba(0, 200, 83, 0.5)';
+                    setTimeout(() => {
+                        micBtn.style.boxShadow = '';
+                    }, 2000);
+                }
+            } catch (err) {
+                console.log('Mikrofon-tilladelse:', err.name);
+                if (err.name === 'NotAllowedError') {
+                    showMessage('⚠️ Tillad mikrofon for stemme-input', 'error');
+                } else if (err.name === 'NotFoundError') {
+                    console.log('Ingen mikrofon fundet');
+                }
+            }
+        }
+
+        function changeUserName() {
+            if (confirm('Vil du skifte kaldenavn?')) {
+                const newName = prompt('Nyt kaldenavn:', currentUser);
+                if (newName && newName.trim()) {
+                    localStorage.setItem('currentUserName', newName.trim());
+                    currentUser = newName.trim();
+                    document.getElementById('userDisplay').textContent = `👤 ${currentUser}`;
+                    showMessage('✅ Kaldenavn opdateret!', 'success');
+                }
+            }
+        }
+
+        // Enter-tast i login
+        document.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && document.getElementById('loginModal').classList.contains('active')) {
+                setUserName();
+            }
+        });
+
+        document.getElementById('itemForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (!currentGroup) {
+                showMessage('❌ Vælg en gruppe først', 'error');
+                return;
+            }
+            
+            const itemName = document.getElementById('itemName').value.trim();
+            const itemQuantity = document.getElementById('itemQuantity').value.trim();
+            
+            if (!itemName) {
+                showMessage('❌ Skriv varenavn', 'error');
+                return;
+            }
+            
+            // Smart duplicate handling - læg mængder sammen automatisk
+            const existingItems = document.querySelectorAll('.item');
+            let existingQuantity = null;
+            let existingCard = null;
+            existingItems.forEach(card => {
+                const cardName = card.querySelector('.item-name')?.textContent.trim().toLowerCase();
+                if (cardName && cardName === itemName.toLowerCase()) {
+                    const qtyBadge = card.querySelector('.quantity-badge');
+                    existingQuantity = qtyBadge ? qtyBadge.textContent.replace('📦 ', '').trim() : '1';
+                    existingCard = card;
+                }
+            });
+            
+            if (existingQuantity && existingCard) {
+                // Smart merge - parse og læg tal sammen
+                const merged = mergeQuantities(existingQuantity, itemQuantity);
+                await editQuantity(itemName, existingQuantity, merged);
+                
+                // Flash effekt på varen
+                setTimeout(() => {
+                    const updatedItems = document.querySelectorAll('.item');
+                    updatedItems.forEach(card => {
+                        const cardName = card.querySelector('.item-name')?.textContent.trim().toLowerCase();
+                        if (cardName && cardName === itemName.toLowerCase()) {
+                            card.classList.add('flash');
+                            card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            setTimeout(() => card.classList.remove('flash'), 600);
+                        }
+                    });
+                }, 100);
+                
+                showMessage(`📦 ${itemName}: ${existingQuantity} + ${itemQuantity} = ${merged}`, 'success');
+                document.getElementById('itemForm').reset();
+                document.getElementById('itemQuantity').value = '1';
+                document.getElementById('itemName').focus();
+                return;
+            }
+            
+        function mergeQuantities(q1, q2) {
+            // Prøv at parse tal og enhed
+            const parse = (q) => {
+                const match = q.match(/^([\d.,]+)\s*(.*)$/);
+                if (match) {
+                    return { num: parseFloat(match[1].replace(',', '.')), unit: match[2].trim().toLowerCase() };
+                }
+                return null;
+            };
+            
+            const p1 = parse(q1);
+            const p2 = parse(q2);
+            
+            // Hvis begge kan parses og har samme enhed (eller ingen enhed)
+            if (p1 && p2 && p1.unit === p2.unit) {
+                const sum = p1.num + p2.num;
+                const formatted = Number.isInteger(sum) ? sum.toString() : sum.toFixed(1);
+                return p1.unit ? `${formatted} ${p1.unit}` : formatted;
+            }
+            
+            // Fallback: brug den nye værdi
+            return q2;
+        }
+            
+            const item = {
+                name: itemName,
+                quantity: itemQuantity,
+                added_by: currentUser
+            };
+
+            try {
+                showLoading(true);
+                
+                const response = await fetch(`${API_URL}/add_item`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(item)
+                });
+
+                if (response.ok) {
+                    showMessage('✅ Vare tilføjet!', 'success');
+                    document.getElementById('itemForm').reset();
+                    document.getElementById('itemQuantity').value = '1';
+                    document.getElementById('itemName').focus();
+                    await loadCurrentGroup();
+                    await loadGroups();
+                } else {
+                    const errorData = await response.json();
+                    showMessage(`❌ ${errorData.message || 'Fejl ved tilføjelse'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Network error:', error);
+                showMessage('❌ Netværksfejl - tjek internet', 'error');
+            } finally {
+                showLoading(false);
+            }
+        });
+
+        async function loadGroups() {
+            try {
+                showLoading(true);
+                const response = await fetch(`${API_URL}/groups`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                activeGroups = data.active_groups || [];
+                const groupsList = document.getElementById('groupsList');
+                const groups = data.groups || [];
+                
+                if (groups.length === 0) {
+                    groupsList.innerHTML = '<p style="padding: 10px 20px; color: #999;">Opret en gruppe for at starte!</p>';
+                    currentGroup = null;
+                    return;
+                }
+                
+                groupsList.innerHTML = groups.map(group => `
+                    <div style="display: inline-flex; align-items: center;">
+                        <button 
+                            class="group-button ${activeGroups.includes(group.id) ? 'active' : ''}" 
+                            data-group-id="${group.id}"
+                            data-group-name="${group.name}"
+                            title="Hold 2 sek for at slette">
+                            <span>${activeGroups.includes(group.id) ? '✓' : ''}</span>
+                            ${group.name} (${group.member_count})
+                        </button>
+                    </div>
+                `).join('');
+                
+                // Tilføj event handlers til gruppe-knapper
+                initGroupHandlers();
+                
+                // SMART AUTO-VALG AF GRUPPE
+                await smartAutoSelectGroup(groups);
+                
+                updateActiveGroupsDisplay();
+            } catch (error) {
+                console.error('Load groups error:', error);
+                showMessage('❌ Kunne ikke hente grupper', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // Smart auto-valg af gruppe
+        async function smartAutoSelectGroup(groups) {
+            // Hvis allerede en aktiv gruppe, behold den
+            if (activeGroups.length > 0) {
+                currentGroup = activeGroups[0];
+                localStorage.setItem('lastActiveGroup', currentGroup);
+                return;
+            }
+            
+            // Prøv at gendanne sidst brugte gruppe
+            const lastGroup = localStorage.getItem('lastActiveGroup');
+            if (lastGroup && groups.some(g => g.id === lastGroup)) {
+                await activateGroupSilently(lastGroup);
+                return;
+            }
+            
+            // Hvis kun 1 gruppe, vælg automatisk
+            if (groups.length === 1) {
+                await activateGroupSilently(groups[0].id);
+                showMessage(`✅ ${groups[0].name} valgt automatisk`, 'success');
+                return;
+            }
+            
+            // Ellers: ingen gruppe valgt, brugeren må vælge
+            currentGroup = null;
+        }
+        
+        // Aktiver gruppe uden UI feedback (til auto-valg)
+        async function activateGroupSilently(groupId) {
+            try {
+                const response = await fetch(`${API_URL}/active-groups`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify([groupId])
+                });
+                
+                if (response.ok) {
+                    activeGroups = [groupId];
+                    currentGroup = groupId;
+                    localStorage.setItem('lastActiveGroup', groupId);
+                    await loadCurrentGroup();
+                    await loadMembers();
+                    
+                    // Opdater UI
+                    document.querySelectorAll('.group-button').forEach(btn => {
+                        const id = btn.dataset.groupId;
+                        btn.classList.toggle('active', id === groupId);
+                        btn.querySelector('span').textContent = id === groupId ? '✓' : '';
+                    });
+                }
+            } catch(e) {
+                console.error('Silent activate error:', e);
+            }
+        }
+
+        async function createNewGroup() {
+            const input = document.getElementById('newGroupInput');
+            const name = input.value.trim();
+            
+            console.log('Creating group:', { name, currentUser });
+            
+            if (!currentUser) {
+                showMessage('❌ Du skal være logget ind først', 'error');
+                return;
+            }
+            
+            if (!name) {
+                showMessage('❌ Skriv navn på gruppe', 'error');
+                input.focus();
+                return;
+            }
+            
+            if (name.length < 2) {
+                showMessage('❌ Navn skal være mindst 2 tegn', 'error');
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`${API_URL}/group/${encodeURIComponent(name)}?owner_id=${encodeURIComponent(currentUser)}`, { method: 'POST' });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    input.value = '';
+                    
+                    // Auto-aktiver den nye gruppe
+                    const groupId = data.group_id || name;
+                    activeGroups = [groupId];
+                    currentGroup = groupId;
+                    localStorage.setItem('lastActiveGroup', groupId);
+                    
+                    // Synkroniser med backend
+                    await fetch(`${API_URL}/active-groups`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify([groupId])
+                    });
+                    
+                    // Genindlæs grupper
+                    await loadGroups();
+                    
+                    showMessage(`✅ Gruppe "${name}" oprettet!`, 'success');
+                } else {
+                    const errorData = await response.json();
+                    showMessage(`❌ ${errorData.message || 'Kunne ikke oprette gruppe'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Create group error:', error);
+                showMessage('❌ Netværksfejl - prøv igen', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function toggleGroup(groupId) {
+            // Single-group activation: kun én gruppe aktiv ad gangen
+            const wasActive = activeGroups.includes(groupId);
+            let newActiveGroups = wasActive ? [] : [groupId];
+            
+            if (wasActive) {
+                showMessage(`Gruppe deaktiveret`, 'error');
+                localStorage.removeItem('lastActiveGroup');
+            } else {
+                showMessage(`✅ Gruppe aktiveret!`, 'success');
+                localStorage.setItem('lastActiveGroup', groupId);
+            }
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`${API_URL}/active-groups`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(newActiveGroups)
+                });
+                
+                if (response.ok) {
+                    activeGroups = newActiveGroups;
+                    currentGroup = wasActive ? null : groupId;
+                    updateActiveGroupsDisplay();
+                    await loadGroups();
+                    await loadCurrentGroup();
+                    await loadMembers();
+                } else {
+                    const errorData = await response.json();
+                    showMessage(`❌ ${errorData.message || 'Fejl ved aktivering'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Fejl:', error);
+                showMessage('❌ Netværksfejl - tjek forbindelse', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Long-press handler for gruppe-sletning
+        function initGroupHandlers() {
+            const buttons = document.querySelectorAll('.group-button');
+            
+            buttons.forEach(btn => {
+                let holdTimer = null;
+                let startTime = 0;
+                const groupId = btn.dataset.groupId;
+                const groupName = btn.dataset.groupName;
+                const HOLD_DURATION = 2000; // 2 sekunder
+                
+                const startHold = (e) => {
+                    startTime = Date.now();
+                    btn.classList.add('holding');
+                    
+                    holdTimer = setTimeout(() => {
+                        // Vibrer hvis muligt
+                        if (navigator.vibrate) navigator.vibrate([50, 50, 100]);
+                        
+                        btn.classList.remove('holding');
+                        btn.classList.add('deleting');
+                        
+                        // Slet efter animation
+                        setTimeout(() => {
+                            deleteGroup(groupId, groupName);
+                        }, 300);
+                    }, HOLD_DURATION);
+                };
+                
+                const endHold = (e) => {
+                    const heldTime = Date.now() - startTime;
+                    btn.classList.remove('holding');
+                    
+                    if (holdTimer) {
+                        clearTimeout(holdTimer);
+                        holdTimer = null;
+                    }
+                    
+                    // Hvis kort tryk = toggle gruppe
+                    if (heldTime < 300) {
+                        toggleGroup(groupId);
+                    } else if (heldTime < HOLD_DURATION) {
+                        // Halvvejs = vis hint
+                        showMessage(`Hold lidt længere for at slette ${groupName}`, 'success');
+                    }
+                };
+                
+                const cancelHold = () => {
+                    btn.classList.remove('holding');
+                    if (holdTimer) {
+                        clearTimeout(holdTimer);
+                        holdTimer = null;
+                    }
+                };
+                
+                // Touch events
+                btn.addEventListener('touchstart', startHold, { passive: true });
+                btn.addEventListener('touchend', endHold);
+                btn.addEventListener('touchcancel', cancelHold);
+                btn.addEventListener('touchmove', cancelHold, { passive: true });
+                
+                // Mouse events (for desktop)
+                btn.addEventListener('mousedown', startHold);
+                btn.addEventListener('mouseup', endHold);
+                btn.addEventListener('mouseleave', cancelHold);
+            });
+        }
+
+        async function deleteGroup(groupId, groupName = 'Gruppe') {
+            // Slet direkte - ingen undo nødvendig med long-press
+            try {
+                const response = await fetch(`${API_URL}/group/${groupId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showMessage(`🗑️ ${groupName} slettet`, 'success');
+                    if (currentGroup === groupId) currentGroup = null;
+                    await loadGroups();
+                    await loadCurrentGroup();
+                }
+            } catch (error) {
+                console.error('Delete group error:', error);
+                showMessage('❌ Netværksfejl', 'error');
+            }
+        }
+
+        async function loadCurrentGroup() {
+            if (!currentGroup) {
+                document.getElementById('itemsList').innerHTML = `
+                    <div class="empty-state">
+                        <div class="emoji">📋</div>
+                        <p>Vælg en gruppe først</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`${API_URL}/group/${currentGroup}/items`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                const itemsList = document.getElementById('itemsList');
+                const itemCount = document.getElementById('itemCount');
+                
+                if (data.items && data.items.length > 0) {
+                    itemsList.innerHTML = `<div class="swipe-hint">← swipe for købt • hold højre 1 sek = slet →</div>` + data.items.map(item => `
+                        <div class="item" data-item-name="${item.name}" data-quantity="${item.quantity}">
+                            <div class="swipe-bg swipe-bg-left">✓ Købt</div>
+                            <div class="swipe-bg swipe-bg-right">🗑️ Slet</div>
+                            <div class="item-inner">
+                                <div class="item-content">
+                                    <div class="item-name">${item.name}</div>
+                                    <div class="item-info">
+                                        <span class="quantity-badge" onclick="openQuantityModal('${item.name}', '${item.quantity}')" title="Klik for at ændre mængde" style="cursor: pointer;">📦 ${item.quantity}</span>
+                                        <span>👤 ${item.added_by}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                    itemCount.textContent = data.items.length;
+                    
+                    // Tilføj swipe handlers til alle items
+                    initSwipeHandlers();
+                } else {
+                    itemsList.innerHTML = `
+                        <div class="empty-state">
+                            <div class="emoji">📋</div>
+                            <p>Ingen varer i denne gruppe</p>
+                        </div>
+                    `;
+                    itemCount.textContent = '0';
+                }
+            } catch (error) {
+                console.error('Load items error:', error);
+                document.getElementById('itemsList').innerHTML = `
+                    <div class="empty-state">
+                        <div class="emoji">❌</div>
+                        <p>Kunne ikke hente varer</p>
+                    </div>
+                `;
+                showMessage('❌ Kunne ikke hente varer', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Pending deletes (undo-funktionalitet)
+        const pendingDeletes = new Map();
+        
+        async function deleteItem(itemName, skipUndo = false) {
+            if (!currentGroup) return;
+            
+            const item = document.querySelector(`.item[data-item-name="${itemName}"]`);
+            if (!item) return;
+            
+            // Hvis allerede pending, annuller
+            if (pendingDeletes.has(itemName)) {
+                cancelDelete(itemName);
+                return;
+            }
+            
+            // Hvis skipUndo (efter timeout), slet direkte
+            if (skipUndo) {
+                await actuallyDeleteItem(itemName);
+                return;
+            }
+            
+            // Start pending delete med undo-mulighed
+            item.classList.add('pending-delete');
+            if (navigator.vibrate) navigator.vibrate(30);
+            
+            const timeoutId = setTimeout(async () => {
+                item.classList.remove('pending-delete');
+                item.classList.add('fade-out');
+                
+                setTimeout(async () => {
+                    pendingDeletes.delete(itemName);
+                    await actuallyDeleteItem(itemName);
+                }, 500);
+            }, 2500);
+            
+            pendingDeletes.set(itemName, { timeoutId, item });
+            
+            // Klik på item for at fortryde
+            item.onclick = () => cancelDelete(itemName);
+        }
+        
+        function cancelDelete(itemName) {
+            const pending = pendingDeletes.get(itemName);
+            if (pending) {
+                clearTimeout(pending.timeoutId);
+                pending.item.classList.remove('pending-delete', 'fade-out');
+                pending.item.onclick = null;
+                pendingDeletes.delete(itemName);
+                if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
+            }
+        }
+        
+        async function actuallyDeleteItem(itemName) {
+            try {
+                const response = await fetch(`${API_URL}/group/${currentGroup}/item/${encodeURIComponent(itemName)}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadCurrentGroup();
+                    await loadGroups();
+                } else {
+                    showMessage('❌ Fejl ved sletning', 'error');
+                }
+            } catch (error) {
+                console.error('Delete item error:', error);
+                showMessage('❌ Netværksfejl', 'error');
+            }
+        }
+
+        // Swipe gesture handling
+        function initSwipeHandlers() {
+            const items = document.querySelectorAll('.item');
+            
+            items.forEach(item => {
+                let startX = 0;
+                let currentX = 0;
+                let holdTimer = null;
+                let deleteTriggered = false;
+                let isSwiping = false;
+                let holdStartTime = 0;
+                
+                const inner = item.querySelector('.item-inner');
+                const itemName = item.dataset.itemName;
+                const rightBg = item.querySelector('.swipe-bg-right');
+                
+                item.addEventListener('touchstart', (e) => {
+                    startX = e.touches[0].clientX;
+                    isSwiping = true;
+                    deleteTriggered = false;
+                    holdStartTime = 0;
+                    if (holdTimer) {
+                        clearTimeout(holdTimer);
+                        holdTimer = null;
+                    }
+                }, { passive: true });
+                
+                item.addEventListener('touchmove', (e) => {
+                    if (!isSwiping || deleteTriggered) return;
+                    
+                    currentX = e.touches[0].clientX;
+                    const diff = currentX - startX;
+                    
+                    // Begræns swipe
+                    const maxSwipe = 100;
+                    const clampedDiff = Math.max(-maxSwipe, Math.min(maxSwipe, diff));
+                    
+                    inner.style.transform = `translateX(${clampedDiff}px)`;
+                    inner.style.transition = 'none';
+                    
+                    // Vis baggrund baseret på retning
+                    if (diff < -30) {
+                        item.classList.add('swiping-left');
+                        item.classList.remove('swiping-right');
+                        // Stop hold timer ved venstre swipe
+                        if (holdTimer) {
+                            clearTimeout(holdTimer);
+                            holdTimer = null;
+                            holdStartTime = 0;
+                        }
+                        if (rightBg) rightBg.classList.remove('hold-active');
+                    } else if (diff > 50) {
+                        item.classList.add('swiping-right');
+                        item.classList.remove('swiping-left');
+                        
+                        // Start 1 sek hold timer ved tilstrækkelig swipe
+                        if (!holdTimer && !deleteTriggered) {
+                            holdStartTime = Date.now();
+                            if (rightBg) {
+                                rightBg.innerHTML = '⏳ Hold...';
+                            }
+                            
+                            holdTimer = setTimeout(() => {
+                                // Slet efter 1 sekund hold
+                                deleteTriggered = true;
+                                if (navigator.vibrate) navigator.vibrate([50, 30, 50]);
+                                if (rightBg) {
+                                    rightBg.classList.add('hold-active');
+                                    rightBg.innerHTML = '✓ Sletter!';
+                                }
+                                
+                                // Animate og slet
+                                inner.style.transition = 'transform 0.3s ease';
+                                inner.style.transform = 'translateX(100%)';
+                                
+                                setTimeout(() => {
+                                    deleteItem(itemName);
+                                }, 300);
+                            }, 1000);
+                        }
+                    } else {
+                        item.classList.remove('swiping-left', 'swiping-right');
+                        if (holdTimer) {
+                            clearTimeout(holdTimer);
+                            holdTimer = null;
+                            holdStartTime = 0;
+                        }
+                        if (rightBg) {
+                            rightBg.classList.remove('hold-active');
+                            rightBg.innerHTML = '🗑️ Slet';
+                        }
+                    }
+                }, { passive: true });
+                
+                item.addEventListener('touchend', () => {
+                    if (deleteTriggered) {
+                        // Allerede slettet, nulstil bare
+                        isSwiping = false;
+                        return;
+                    }
+                    
+                    const diff = currentX - startX;
+                    
+                    // Stop hold timer
+                    if (holdTimer) {
+                        clearTimeout(holdTimer);
+                        holdTimer = null;
+                    }
+                    
+                    inner.style.transition = 'transform 0.2s ease';
+                    inner.style.transform = 'translateX(0)';
+                    
+                    // Nulstil baggrund
+                    if (rightBg) {
+                        rightBg.classList.remove('hold-active');
+                        rightBg.innerHTML = '🗑️ Slet';
+                    }
+                    
+                    // Swipe venstre = købt
+                    if (diff < -60 && !item.classList.contains('bought')) {
+                        item.classList.add('bought');
+                        showMessage(`✓ ${itemName} købt!`, 'success');
+                    } else if (diff < -60 && item.classList.contains('bought')) {
+                        // Swipe igen for at fjerne købt
+                        item.classList.remove('bought');
+                        showMessage(`↩ ${itemName} tilbage på listen`, 'success');
+                    }
+                    
+                    // Clear states
+                    item.classList.remove('swiping-left', 'swiping-right');
+                    isSwiping = false;
+                    startX = 0;
+                    currentX = 0;
+                    holdStartTime = 0;
+                });
+            });
+        }
+
+        function markBought(itemName) {
+            // Fallback for non-touch
+            const item = document.querySelector(`.item[data-item-name="${itemName}"]`);
+            if (item) {
+                item.classList.toggle('bought');
+                if (item.classList.contains('bought')) {
+                    showMessage(`✓ ${itemName} købt!`, 'success');
+                } else {
+                    showMessage(`↩ ${itemName} tilbage`, 'success');
+                }
+            }
+        }
+
+        let editingItemName = null;
+        
+        function openQuantityModal(itemName, currentQuantity) {
+            editingItemName = itemName;
+            document.getElementById('quantityItemName').textContent = `📦 ${itemName}`;
+            document.getElementById('quantityInput').value = currentQuantity || '';
+            document.getElementById('quantityModal').classList.add('active');
+            document.getElementById('quantityInput').focus();
+            document.getElementById('quantityInput').select();
+        }
+        
+        function closeQuantityModal() {
+            editingItemName = null;
+            document.getElementById('quantityModal').classList.remove('active');
+        }
+        
+        async function saveQuantity() {
+            const newQuantity = document.getElementById('quantityInput').value.trim();
+            
+            if (!newQuantity) {
+                showMessage('❌ Skriv en mængde', 'error');
+                return;
+            }
+            
+            closeQuantityModal();
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`${API_URL}/group/${currentGroup}/item/${encodeURIComponent(editingItemName)}/quantity`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ quantity: newQuantity })
+                });
+                
+                if (response.ok) {
+                    showMessage(`✅ Mængde opdateret`, 'success');
+                    await loadCurrentGroup();
+                } else {
+                    const errorData = await response.json();
+                    showMessage(`❌ ${errorData.message || 'Fejl'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Edit quantity error:', error);
+                showMessage('❌ Netværksfejl', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        // Enter-key i quantity modal
+        document.getElementById('quantityInput')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') saveQuantity();
+        });
+        
+        // Klik udenfor modal lukker den
+        document.getElementById('quantityModal')?.addEventListener('click', (e) => {
+            if (e.target.id === 'quantityModal') closeQuantityModal();
+        });
+        
+        async function editQuantity(itemName, currentQuantity, newQuantity = null) {
+            if (newQuantity) {
+                // Direkte opdatering (fra duplicate detection)
+                try {
+                    showLoading(true);
+                    const response = await fetch(`${API_URL}/group/${currentGroup}/item/${encodeURIComponent(itemName)}/quantity`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ quantity: newQuantity })
+                    });
+                    
+                    if (response.ok) {
+                        await loadCurrentGroup();
+                    }
+                } catch (error) {
+                    console.error('Edit quantity error:', error);
+                } finally {
+                    showLoading(false);
+                }
+            } else {
+                // Åbn modal
+                openQuantityModal(itemName, currentQuantity);
+            }
+        }
+
+        async function loadMembers() {
+            if (!currentGroup) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/group/${currentGroup}/members`);
+                const data = await response.json();
+                
+                const membersList = document.getElementById('membersList');
+                const groupOwner = data.owner;
+                const isOwner = groupOwner === currentUser;
+                
+                // Debug
+                console.log('DEBUG loadMembers:', { currentUser, groupOwner, isOwner, members: data.members });
+                
+                if (data.members && data.members.length > 0) {
+                    membersList.innerHTML = data.members.map(member => {
+                        const isCurrentUser = member === currentUser;
+                        const isMemberOwner = member === groupOwner;
+                        // Ejeren kan slette alle medlemmer UNDTAGEN sig selv
+                        const canDelete = isOwner && member !== groupOwner;
+                        
+                        let badgeContent = '';
+                        if (isCurrentUser && isMemberOwner) {
+                            badgeContent = '<span style="font-size: 10px; background: #ff9f43; color: white; padding: 2px 6px; border-radius: 10px;">du (ejer)</span>';
+                        } else if (isCurrentUser) {
+                            badgeContent = '<span style="font-size: 10px; background: #667eea; color: white; padding: 2px 6px; border-radius: 10px;">du</span>';
+                        } else if (isMemberOwner) {
+                            badgeContent = '<span style="font-size: 10px; background: #ff9f43; color: white; padding: 2px 6px; border-radius: 10px;">ejer</span>';
+                        }
+                        
+                        return `
+                            <div class="member-badge" style="display: flex; align-items: center; gap: 6px;">
+                                👤 ${member}
+                                ${badgeContent}
+                                ${canDelete ? `<button onclick="removeMember('${member}')" style="background: #ff6b6b; color: white; border: none; padding: 2px 6px; border-radius: 4px; font-size: 10px; cursor: pointer; margin-left: 4px;">✕</button>` : ''}
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    membersList.innerHTML = '<div style="color: #999; font-size: 12px;">Ingen medlemmer</div>';
+                }
+                
+                // Load pending invitations
+                await loadPendingInvitations();
+                
+            } catch (error) {
+                console.error(error);
+            }
+        }
+
+        async function removeMember(memberName) {
+            if (!confirm(`Fjern ${memberName} fra gruppen?`)) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/group/${currentGroup}/member/${encodeURIComponent(memberName)}?owner_check=${encodeURIComponent(currentUser)}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    showMessage(`✅ ${memberName} fjernet!`, 'success');
+                    await loadMembers();
+                } else {
+                    const error = await response.json();
+                    showMessage(`❌ ${error.message}`, 'error');
+                }
+            } catch (error) {
+                console.error(error);
+                showMessage('❌ Fejl', 'error');
+            }
+        }
+
+        async function addMember() {
+            // Legacy funktion - bruger nu inviteMember
+            inviteMember();
+        }
+
+        async function inviteMember() {
+            const memberInput = document.getElementById('memberInput');
+            const email = memberInput.value.trim();
+            
+            if (!currentGroup) {
+                showMessage('❌ Vælg en gruppe først', 'error');
+                return;
+            }
+            
+            if (!email) {
+                showMessage('❌ Skriv email', 'error');
+                return;
+            }
+            
+            // Simpel email validering
+            if (!email.includes('@') || !email.includes('.')) {
+                showMessage('❌ Ugyldig email', 'error');
+                return;
+            }
+            
+            // Find gruppenavn
+            const groupData = allGroups.find(g => g.id === currentGroup);
+            const groupName = groupData ? groupData.name : currentGroup;
+            
+            try {
+                showLoading(true);
+                const response = await fetch(`${API_URL}/invite/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: email,
+                        group_id: currentGroup,
+                        group_name: groupName,
+                        inviter_name: currentUser
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    if (data.email_sent) {
+                        showMessage(`📧 Invitation sendt til ${email}!`, 'success');
+                    } else {
+                        // Email ikke konfigureret - vis link i stedet
+                        showMessage(`📋 Invitation oprettet!`, 'success');
+                        // Kopier link til clipboard
+                        if (data.invite_url) {
+                            try {
+                                await navigator.clipboard.writeText(data.invite_url);
+                                showMessage(`📋 Link kopieret! Del det med ${email}`, 'success');
+                            } catch (e) {
+                                console.log('Invite URL:', data.invite_url);
+                                alert(`Del dette link med ${email}:\n\n${data.invite_url}`);
+                            }
+                        }
+                    }
+                    memberInput.value = '';
+                    await loadPendingInvitations();
+                } else {
+                    showMessage(`❌ ${data.message}`, 'error');
+                }
+            } catch (error) {
+                console.error('Invite error:', error);
+                showMessage('❌ Netværksfejl', 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function loadPendingInvitations() {
+            if (!currentGroup) return;
+            
+            try {
+                const response = await fetch(`${API_URL}/group/${currentGroup}/invitations`);
+                const data = await response.json();
+                
+                const container = document.getElementById('pendingInvites');
+                if (!container) return;
+                
+                if (data.invitations && data.invitations.length > 0) {
+                    container.innerHTML = `
+                        <div style="color: #f39c12; font-weight: bold; margin-bottom: 5px;">⏳ Ventende invitationer:</div>
+                        ${data.invitations.map(inv => `
+                            <div class="pending-invite">
+                                <span class="email">${inv.email}</span>
+                                <span class="status">afventer</span>
+                            </div>
+                        `).join('')}
+                    `;
+                } else {
+                    container.innerHTML = '';
+                }
+            } catch (error) {
+                console.error('Error loading invitations:', error);
+            }
+        }
+
+        function handleMemberKeypress(event) {
+            if (event.key === 'Enter') inviteMember();
+        }
+
+        function updateActiveGroupsDisplay() {
+            const count = activeGroups.length;
+            const text = count === 0 ? '0 aktive' : `${count} aktiv${count > 1 ? 'e' : ''}`;
+            document.getElementById('activeGroupCount').textContent = text;
+        }
+
+        let isRecording = false;
+        let recordedTranscript = '';
+        
+        // Lydeffekter med Web Audio API
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playBeep(frequency, duration, type = 'sine') {
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+            
+            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            
+            oscillator.start(audioCtx.currentTime);
+            oscillator.stop(audioCtx.currentTime + duration);
+        }
+        
+        function playStartSound() {
+            // En kort stigende tone
+            playBeep(700, 0.15);
+        }
+        
+        function playStopSound() {
+            // En kort faldende tone
+            playBeep(500, 0.15);
+        }
+        
+        function initMicButton() {
+            // Initialiser begge mikrofon-knapper
+            const micBtns = [
+                document.getElementById('micBtn'),
+                document.getElementById('floatingMic')
+            ].filter(btn => btn !== null);
+            
+            micBtns.forEach(micBtn => {
+                // Touch events (mobil)
+                micBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    startSpeechRecognition();
+                }, { passive: false });
+                
+                micBtn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    stopSpeechRecognition();
+                }, { passive: false });
+                
+                micBtn.addEventListener('touchcancel', (e) => {
+                    stopSpeechRecognition();
+                });
+                
+                // Mouse events (PC)
+                micBtn.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    startSpeechRecognition();
+                });
+                
+                micBtn.addEventListener('mouseup', (e) => {
+                    stopSpeechRecognition();
+                });
+                
+                micBtn.addEventListener('mouseleave', (e) => {
+                    if (isRecording) {
+                        stopSpeechRecognition();
+                    }
+                });
+            });
+        }
+        
+        function startSpeechRecognition() {
+            if (!recognition) {
+                showMessage('❌ Tale ikke understøttet', 'error');
+                return;
+            }
+
+            if (!currentGroup) {
+                showMessage('❌ Vælg gruppe først', 'error');
+                return;
+            }
+            
+            if (isRecording) return;
+
+            const micBtn = document.getElementById('micBtn');
+            const floatingMic = document.getElementById('floatingMic');
+            const itemNameInput = document.getElementById('itemName');
+            
+            // Resume audio context (kræves efter bruger-interaktion)
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            
+            isRecording = true;
+            recordedTranscript = '';
+            
+            // Opdater begge knapper - behold mikrofon-emoji, bare tilføj listening class
+            if (micBtn) {
+                micBtn.classList.add('listening');
+            }
+            if (floatingMic) {
+                floatingMic.classList.add('listening');
+            }
+            
+            itemNameInput.value = '';
+            itemNameInput.placeholder = '🎤 Taler...';
+            
+            // Kun vibration ved start, ingen bip (forstyrrer optagelsen)
+            if (navigator.vibrate) navigator.vibrate(50);
+            
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript || '';
+                    
+                    if (event.results[i].isFinal) {
+                        recordedTranscript += transcript + ' ';
+                    } else {
+                        interimTranscript = transcript;
+                    }
+                }
+                
+                // Vis hvad der høres i realtid
+                const currentText = (recordedTranscript + interimTranscript).trim();
+                if (currentText) {
+                    itemNameInput.value = currentText;
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.log('Speech error:', event.error);
+                isRecording = false;
+                
+                // Nulstil begge knapper
+                const micBtn = document.getElementById('micBtn');
+                const floatingMic = document.getElementById('floatingMic');
+                if (micBtn) {
+                    micBtn.classList.remove('listening');
+                }
+                if (floatingMic) {
+                    floatingMic.classList.remove('listening');
+                }
+                itemNameInput.placeholder = 'fx. Øko mælk';
+                
+                if (event.error === 'not-allowed') {
+                    showMessage('❌ Mikrofon blokeret - åbn i Chrome og tillad mikrofon', 'error');
+                } else if (event.error === 'network') {
+                    showMessage('❌ Netværksfejl - prøv igen', 'error');
+                } else if (event.error !== 'aborted') {
+                    showMessage('❌ Fejl: ' + event.error, 'error');
+                }
+            };
+
+            recognition.onend = () => {
+                // Nulstil recognitionActive flag - recognition er afsluttet
+                recognitionActive = false;
+                console.log('Recognition ended, isRecording:', isRecording);
+            };
+
+            // Start kun hvis ikke allerede aktiv
+            if (!recognitionActive) {
+                try {
+                    recognition.start();
+                    recognitionActive = true;
+                } catch(e) {
+                    console.log('Start error:', e);
+                    isRecording = false;
+                    recognitionActive = false;
+                    if (micBtn) {
+                        micBtn.classList.remove('listening');
+                    }
+                    if (floatingMic) {
+                        floatingMic.classList.remove('listening');
+                    }
+                }
+            }
+        }
+        
+        function stopSpeechRecognition() {
+            if (!isRecording) return;
+            
+            isRecording = false;
+            const micBtn = document.getElementById('micBtn');
+            const floatingMic = document.getElementById('floatingMic');
+            const itemNameInput = document.getElementById('itemName');
+            
+            // Nulstil begge knapper
+            if (micBtn) {
+                micBtn.classList.remove('listening');
+            }
+            if (floatingMic) {
+                floatingMic.classList.remove('listening');
+            }
+            itemNameInput.placeholder = 'fx. Øko mælk';
+            
+            // Kun vibration ved stop, bip forstyrrer
+            if (navigator.vibrate) navigator.vibrate([30, 50, 30]);
+            
+            // Stop recognition korrekt
+            if (recognitionActive) {
+                try {
+                    recognition.stop();
+                    recognitionActive = false;
+                } catch(e) {
+                    console.log('Stop error (ignored):', e);
+                }
+            }
+            
+            // Parse og tilføj varer via backend AI
+            const spokenText = itemNameInput.value.trim();
+            if (spokenText) {
+                parseViaBackend(spokenText);
+            }
+        }
+        
+        // Brug backend AI til at parse stemme-input
+        async function parseViaBackend(text) {
+            const itemNameInput = document.getElementById('itemName');
+            
+            try {
+                const response = await fetch(`${API_URL}/ai/parse`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text, force_ai: false })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Backend parse failed');
+                }
+                
+                const result = await response.json();
+                console.log('Backend parse result:', result);
+                
+                if (result.items && result.items.length > 0) {
+                    // Konverter til frontend format
+                    const items = result.items.map(item => ({
+                        name: item.item,
+                        quantity: item.quantity
+                    }));
+                    
+                    if (items.length > 1) {
+                        addMultipleItems(items);
+                        itemNameInput.value = '';
+                    } else {
+                        itemNameInput.value = items[0].name;
+                        document.getElementById('itemQuantity').value = items[0].quantity;
+                        setTimeout(() => {
+                            document.getElementById('itemForm').dispatchEvent(new Event('submit'));
+                        }, 200);
+                    }
+                } else {
+                    // Fallback til lokal parsing hvis backend ikke fandt noget
+                    fallbackToLocalParse(text);
+                }
+            } catch (error) {
+                console.log('Backend parse error, using local:', error);
+                fallbackToLocalParse(text);
+            }
+        }
+        
+        // Fallback til lokal parsing
+        function fallbackToLocalParse(text) {
+            const itemNameInput = document.getElementById('itemName');
+            const items = parseMultipleItems(text);
+            
+            if (items.length > 1) {
+                addMultipleItems(items);
+                itemNameInput.value = '';
+            } else if (items.length === 1) {
+                itemNameInput.value = items[0].name;
+                document.getElementById('itemQuantity').value = items[0].quantity;
+                setTimeout(() => {
+                    document.getElementById('itemForm').dispatchEvent(new Event('submit'));
+                }, 200);
+            }
+        }
+        
+        // ========== SMART PARSER MED PRODUKT-GENKENDELSE ==========
+        
+        // Kendte produkter med kategorier (bruges til smart splitting)
+        const KNOWN_PRODUCTS = {
+            // Mejeri
+            'mælk': 'mejeri', 'letmælk': 'mejeri', 'minimælk': 'mejeri', 'sødmælk': 'mejeri',
+            'smør': 'mejeri', 'ost': 'mejeri', 'fløde': 'mejeri', 'piskefløde': 'mejeri',
+            'yoghurt': 'mejeri', 'skyr': 'mejeri', 'kefir': 'mejeri', 'cremefraiche': 'mejeri',
+            // Kød
+            'kylling': 'kød', 'oksekød': 'kød', 'hakket': 'kød', 'hakkekød': 'kød',
+            'svinekød': 'kød', 'lammekød': 'kød', 'bacon': 'kød', 'pølser': 'kød',
+            'hamburgerryg': 'kød', 'rullepølse': 'kød', 'leverpostej': 'kød',
+            'skinke': 'kød', 'spegepølse': 'kød', 'salami': 'kød',
+            // Fisk
+            'laks': 'fisk', 'tun': 'fisk', 'torsk': 'fisk', 'rødspætte': 'fisk',
+            'rejer': 'fisk', 'tunfisk': 'fisk', 'makrel': 'fisk',
+            // Brød
+            'brød': 'bager', 'rugbrød': 'bager', 'franskbrød': 'bager', 'toastbrød': 'bager',
+            'boller': 'bager', 'wienerbrød': 'bager', 'croissant': 'bager',
+            // Grøntsager
+            'kartofler': 'grønt', 'kartoffel': 'grønt', 'løg': 'grønt', 'hvidløg': 'grønt',
+            'gulerødder': 'grønt', 'gulerod': 'grønt', 'tomater': 'grønt', 'tomat': 'grønt',
+            'agurk': 'grønt', 'salat': 'grønt', 'iceberg': 'grønt', 'peberfrugt': 'grønt',
+            'broccoli': 'grønt', 'spinat': 'grønt', 'champignon': 'grønt', 'svampe': 'grønt',
+            'squash': 'grønt', 'aubergine': 'grønt', 'avocado': 'grønt',
+            // Frugt
+            'æbler': 'frugt', 'æble': 'frugt', 'bananer': 'frugt', 'banan': 'frugt',
+            'appelsiner': 'frugt', 'appelsin': 'frugt', 'pærer': 'frugt', 'pære': 'frugt',
+            'citroner': 'frugt', 'citron': 'frugt', 'vindruer': 'frugt', 'jordbær': 'frugt',
+            'blåbær': 'frugt', 'hindbær': 'frugt', 'melon': 'frugt', 'vandmelon': 'frugt',
+            // Drikkevarer
+            'juice': 'drikkevarer', 'cola': 'drikkevarer', 'sodavand': 'drikkevarer',
+            'øl': 'drikkevarer', 'vin': 'drikkevarer', 'vand': 'drikkevarer',
+            'kaffe': 'drikkevarer', 'te': 'drikkevarer', 'kakao': 'drikkevarer',
+            // Kolonial
+            'pasta': 'kolonial', 'ris': 'kolonial', 'mel': 'kolonial', 'sukker': 'kolonial',
+            'salt': 'kolonial', 'peber': 'kolonial', 'olie': 'kolonial', 'eddike': 'kolonial',
+            'tomatsovs': 'kolonial', 'ketchup': 'kolonial', 'sennep': 'kolonial',
+            'mayonnaise': 'kolonial', 'remoulade': 'kolonial', 'dressing': 'kolonial',
+            // Frost
+            'is': 'frost', 'pizza': 'frost', 'pomfritter': 'frost', 'frysepizza': 'frost',
+            // Snacks
+            'chips': 'snacks', 'slik': 'snacks', 'chokolade': 'snacks', 'kage': 'snacks',
+            'nødder': 'snacks', 'popcorn': 'snacks',
+            // Husholdning
+            'toiletpapir': 'husholdning', 'køkkenrulle': 'husholdning', 'sæbe': 'husholdning',
+            'shampoo': 'husholdning', 'opvaskemiddel': 'husholdning', 'vaskepulver': 'husholdning',
+            // Æg
+            'æg': 'æg'
+        };
+        
+        // Mængde-mønster (inspireret af Python-koden)
+        const AMOUNT_PATTERN = /(\d+(?:[.,]\d+)?\s*(?:l|liter|ml|dl|cl|stk|stykker?|pakke|pakker|pk|poser?|g|gram|kg|kilo|fl|flaske|flasker|ds|dåse|dåser|bk|bakke|bakker|bundt|net)?)/i;
+        
+        // Parser tekst for at finde flere varer - SMART VERSION
+        function parseMultipleItems(text) {
+            // Normaliser tekst
+            text = text.toLowerCase().trim();
+            
+            // Fjern fyldord fra starten
+            text = text.replace(/^(skal have|jeg skal have|vi skal have|vi mangler|mangler|skal bruge|tilføj|køb|hent|tag)\s+/i, '');
+            text = text.replace(/^(nej|nå|nåh|øh|ehm|ok|okay)\s+/i, '');
+            
+            console.log('Cleaned text:', text);
+            
+            // Split på eksplicitte separatorer
+            const parts = text.split(/\s+og\s+|\s*,\s*|\s+samt\s+|\s+plus\s+|\s+så\s+/gi).filter(p => p.trim());
+            
+            console.log('After separator split:', parts);
+            
+            // For hver del, prøv at splitte yderligere hvis der er flere produkter
+            const allParts = [];
+            for (const part of parts) {
+                const subParts = smartSplitByProducts(part.trim());
+                allParts.push(...subParts);
+            }
+            
+            console.log('After smart split:', allParts);
+            
+            // Parse hver del til et item
+            const items = [];
+            for (let part of allParts) {
+                part = part.trim();
+                if (!part || part.length < 2) continue;
+                
+                const parsed = parseItemPart(part);
+                if (parsed) {
+                    items.push(parsed);
+                }
+            }
+            
+            console.log('Final items:', items);
+            return items;
+        }
+        
+        // Smart splitting baseret på produktgenkendelse
+        function smartSplitByProducts(text) {
+            const words = text.split(/\s+/);
+            if (words.length <= 2) return [text];
+            
+            const parts = [];
+            let currentPart = [];
+            let lastProductIndex = -1;
+            
+            for (let i = 0; i < words.length; i++) {
+                const word = words[i];
+                
+                // Check om dette ord er et kendt produkt
+                const isKnownProduct = Object.keys(KNOWN_PRODUCTS).some(p => 
+                    word === p || word.startsWith(p) || p.startsWith(word)
+                );
+                
+                // Check om næste ord starter en ny mængde (tal eller "en/et")
+                const nextWord = words[i + 1] || '';
+                const nextIsQuantity = /^(\d+|en|et|to|tre|fire|fem)$/i.test(nextWord);
+                const nextIsKnownProduct = Object.keys(KNOWN_PRODUCTS).some(p => 
+                    nextWord === p || nextWord.startsWith(p) || p.startsWith(nextWord)
+                );
+                
+                currentPart.push(word);
+                
+                if (isKnownProduct) {
+                    lastProductIndex = currentPart.length - 1;
+                    
+                    // Hvis næste ord er en mængde eller et nyt produkt, afslut denne del
+                    if (nextIsQuantity || (nextIsKnownProduct && i < words.length - 1)) {
+                        parts.push(currentPart.join(' '));
+                        currentPart = [];
+                        lastProductIndex = -1;
+                    }
+                }
+            }
+            
+            // Tilføj resterende ord
+            if (currentPart.length > 0) {
+                parts.push(currentPart.join(' '));
+            }
+            
+            console.log(`smartSplitByProducts("${text}") -> `, parts);
+            return parts.length > 0 ? parts : [text];
+        }
+        
+        // Parser en enkelt vare-del
+        function parseItemPart(part) {
+            part = part.trim();
+            if (!part) return null;
+            
+            // Håndter specielle mønstre FØRST
+            
+            // "halvanden liter mælk", "halvanden kilo kartofler", "halvandet kilo"
+            const halvanden = part.match(/^(halvanden|halvandet)\s*(l|liter|kg|kilo)?\s*(.*)$/i);
+            if (halvanden) {
+                const unit = halvanden[2] ? normalizeUnit(halvanden[2]) : 'stk';
+                const itemName = halvanden[3] ? halvanden[3].trim() : '';
+                if (itemName) {
+                    return { name: capitalize(itemName), quantity: `1.5 ${unit}` };
+                }
+                // Hvis ingen vare-navn, returner null (ufuldstændig)
+                return null;
+            }
+            
+            // "en halv liter mælk", "et halvt kilo ost"
+            const halvMatch = part.match(/^(en|et)\s+(halv|halvt)\s*(l|liter|kg|kilo|dl)?\s*(.+)$/i);
+            if (halvMatch) {
+                const unit = halvMatch[3] ? normalizeUnit(halvMatch[3]) : '';
+                const itemName = halvMatch[4].trim();
+                if (unit) {
+                    return { name: capitalize(itemName), quantity: `0.5 ${unit}` };
+                }
+                const smartQty = guessQuantityForItem(itemName);
+                const guessedUnit = smartQty.replace(/^[\d.,]+\s*/, '');
+                return { name: capitalize(itemName), quantity: `0.5 ${guessedUnit}` };
+            }
+            
+            // "en liter mælk", "et kilo kartofler"
+            const unitMatch = part.match(/^(en|et)\s+(liter|l|kilo|kg|dl)\s+(.+)$/i);
+            if (unitMatch) {
+                const unit = normalizeUnit(unitMatch[2]);
+                const itemName = unitMatch[3].trim();
+                return { name: capitalize(itemName), quantity: `1 ${unit}` };
+            }
+            
+            // Prøv at finde mængde med regex
+            const amountMatch = part.match(AMOUNT_PATTERN);
+            let quantity = '';
+            let itemName = part;
+            
+            if (amountMatch) {
+                quantity = amountMatch[1].trim();
+                // Fjern mængden fra teksten
+                itemName = part.replace(AMOUNT_PATTERN, '').trim();
+                
+                // Normaliser enheden i quantity
+                const qtyParts = quantity.match(/^([\d.,]+)\s*(.*)$/);
+                if (qtyParts) {
+                    const num = qtyParts[1].replace(',', '.');
+                    const unit = qtyParts[2] ? normalizeUnit(qtyParts[2]) : 'stk';
+                    quantity = `${num} ${unit}`;
+                }
+            }
+            
+            // Fjern resterende fyldord
+            itemName = itemName.replace(/^(en|et|noget|lidt)\s+/i, '');
+            itemName = itemName.replace(/\s+(stykker?|stk)$/i, '');
+            
+            // Håndter "X stk Y" mønster
+            const stkMatch = part.match(/^(\d+)\s+(?:stk|stykker?)?\s*(.+)$/i);
+            if (stkMatch && !quantity) {
+                quantity = stkMatch[1] + ' stk';
+                itemName = stkMatch[2];
+            }
+            
+            // Hvis ingen mængde fundet, gæt baseret på varen
+            if (!quantity) {
+                quantity = guessQuantityForItem(itemName);
+            }
+            
+            // Ryd op i item-navn
+            itemName = itemName.trim();
+            if (!itemName) return null;
+            
+            const result = { 
+                name: capitalize(itemName), 
+                quantity: quantity 
+            };
+            
+            console.log(`Parsed "${part}" -> ${result.name} (${result.quantity})`);
+            return result;
+        }
+        
+        // Gætter den bedste enhed baseret på varenavn
+        function guessQuantityForItem(itemName) {
+            const name = itemName.toLowerCase();
+            
+            // Pakke-varer (brød, pålæg, etc.)
+            const pakkeVarer = [
+                'rugbrød', 'franskbrød', 'toastbrød', 'boller', 'rundstykker', 'flutes',
+                'rullepølse', 'leverpostej', 'skinke', 'bacon', 'pølser', 'hotdogs',
+                'ost', 'flødeost', 'cream cheese', 'smør', 'margarine',
+                'pasta', 'ris', 'mel', 'sukker', 'havregryn', 'cornflakes', 'müsli',
+                'kaffe', 'te', 'kakao', 'chips', 'slik', 'chokolade', 'kiks', 'småkager',
+                'toiletpapir', 'køkkenrulle', 'servietter', 'plastikposer',
+                'frosne pomfritter', 'frossen pizza', 'frosne grøntsager'
+            ];
+            
+            // Liter-varer (drikkevarer, mejeriprodukter)
+            const literVarer = [
+                'mælk', 'letmælk', 'minimælk', 'skummetmælk', 'sødmælk', 'øko mælk',
+                'juice', 'appelsinjuice', 'æblejuice', 'multivitamin',
+                'fløde', 'piskefløde', 'madlavningsfløde', 'creme fraiche',
+                'yoghurt', 'a38', 'tykmælk', 'kefir', 'skyr',
+                'olie', 'olivenolie', 'rapsolie', 'solsikkeolie',
+                'vand', 'sodavand', 'cola', 'pepsi', 'fanta', 'sprite'
+            ];
+            
+            // Bakke-varer
+            const bakkeVarer = [
+                'æg', 'kyllingebryst', 'kyllingelår', 'hakket kød', 'oksekød', 'svinekød',
+                'kødboller', 'frikadeller', 'jordbær', 'hindbær', 'blåbær', 'champignon'
+            ];
+            
+            // Stk-varer (frugt, grønt, enkelt-items)
+            const stkVarer = [
+                'agurk', 'tomat', 'peberfrugt', 'squash', 'aubergine', 'broccoli',
+                'blomkål', 'spidskål', 'iceberg', 'salat', 'avocado',
+                'æble', 'pære', 'banan', 'appelsin', 'citron', 'lime', 'mango', 'ananas',
+                'løg', 'rødløg', 'forårsløg', 'hvidløg', 'ingefær',
+                'gulerod', 'kartoffel', 'sød kartoffel',
+                'hamburger', 'burger', 'hotdog', 'sandwich', 'wrap',
+                'croissant', 'kanelsnegl', 'wienerbrød'
+            ];
+            
+            // Bundt-varer
+            const bundtVarer = [
+                'persille', 'dild', 'koriander', 'basilikum', 'mynte', 'purløg',
+                'radiser', 'asparges', 'spinat', 'rucola'
+            ];
+            
+            // Pose/net-varer
+            const poseVarer = [
+                'kartofler', 'løg', 'gulerødder', 'æbler', 'appelsiner', 'klementiner'
+            ];
+            
+            // Dåse-varer
+            const daaseVarer = [
+                'flåede tomater', 'hakkede tomater', 'tomatpure', 'bønner', 'kikærter',
+                'majs', 'tun', 'makrel', 'kokosmælk'
+            ];
+            
+            // Flaske-varer
+            const flaskeVarer = [
+                'ketchup', 'sennep', 'mayonnaise', 'remoulade', 'dressing',
+                'soja', 'tabasco', 'øl', 'vin', 'spiritus'
+            ];
+            
+            // Check alle kategorier
+            for (const vare of pakkeVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 pk';
+            }
+            for (const vare of literVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 L';
+            }
+            for (const vare of bakkeVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 bk';
+            }
+            for (const vare of bundtVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 bundt';
+            }
+            for (const vare of poseVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 pose';
+            }
+            for (const vare of daaseVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 ds';
+            }
+            for (const vare of flaskeVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 fl';
+            }
+            for (const vare of stkVarer) {
+                if (name.includes(vare) || vare.includes(name)) return '1 stk';
+            }
+            
+            // Default: stk
+            return '1 stk';
+        }
+        
+        function normalizeUnit(unit) {
+            unit = unit.toLowerCase();
+            const map = {
+                'kilo': 'kg', 'kg': 'kg',
+                'gram': 'g', 'g': 'g',
+                'liter': 'L', 'l': 'L',
+                'dl': 'dL', 'cl': 'cL', 'ml': 'mL',
+                'stk': 'stk', 'stykker': 'stk', 'stykke': 'stk',
+                'pakke': 'pk', 'pakker': 'pk',
+                'pose': 'pose', 'poser': 'poser',
+                'flaske': 'fl', 'flasker': 'fl',
+                'dåse': 'ds', 'dåser': 'ds',
+                'bakke': 'bk', 'bakker': 'bk',
+                'bundt': 'bundt', 'net': 'net'
+            };
+            return map[unit] || unit;
+        }
+        
+        function capitalize(str) {
+            return str.charAt(0).toUpperCase() + str.slice(1);
+        }
+        
+        async function addMultipleItems(items) {
+            showMessage(`🎤 Tilføjer ${items.length} varer...`, 'success');
+            
+            let added = 0;
+            for (const item of items) {
+                try {
+                    const response = await fetch(`${API_URL}/add_item`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            group_id: currentGroup,
+                            name: item.name,
+                            quantity: item.quantity,
+                            added_by: currentUser
+                        })
+                    });
+                    if (response.ok) added++;
+                } catch(e) {
+                    console.error('Add item error:', e);
+                }
+            }
+            
+            await loadCurrentGroup();
+            await loadGroups();
+            showMessage(`✅ ${added} varer tilføjet!`, 'success');
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        let toastTimeout = null;
+        function showMessage(text, type) {
+            const toast = document.getElementById('toast');
+            
+            // Clear existing timeout
+            if (toastTimeout) clearTimeout(toastTimeout);
+            
+            // Reset animation
+            toast.className = 'toast';
+            toast.textContent = text;
+            
+            // Trigger reflow for animation restart
+            void toast.offsetWidth;
+            
+            // Show toast
+            toast.className = `toast ${type} show`;
+            
+            // Auto-hide after 1.2s
+            toastTimeout = setTimeout(() => {
+                toast.className = 'toast';
+            }, 1200);
+        }
+        
+        // Dismiss toast on any user action
+        document.addEventListener('click', () => {
+            const toast = document.getElementById('toast');
+            if (toast.classList.contains('show')) {
+                toast.className = 'toast';
+            }
+        }, true);
+    </script>
+</body>
+</html>
+
+
+=== requirements.txt ===
+
+fastapi
+uvicorn
+google-cloud-firestore
+firebase-admin
+pydantic
+requests
+python-dotenv
+SpeechRecognition
+
+
+=== .env ===
+
+# Anthropic API Key til Claude AI parsing
+# Hent din API-nøgle fra: https://console.anthropic.com/
+ANTHROPIC_API_KEY=din-api-nøgle-her
+
+# Resend API Key til email-invitationer
+# Hent din API-nøgle fra: https://resend.com/api-keys
+# Gratis: 100 emails/dag, 3000/måned
+RESEND_API_KEY=din-resend-api-nøgle-her
+
+
+

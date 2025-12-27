@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accept invitation - Hey Lobs</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+            min-height: 100vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            margin: 0;
+        }
+        .card { 
+            background: white; 
+            padding: 40px; 
+            border-radius: 20px; 
+            max-width: 500px; 
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2); 
+        }
+        h1 { color: #667eea; margin-bottom: 10px; }
+        .info { background: #f0f4ff; padding: 15px; border-radius: 10px; margin: 20px 0; }
+        input { 
+            width: 100%; 
+            padding: 12px; 
+            border: 2px solid #e0e0e0; 
+            border-radius: 8px; 
+            font-size: 16px; 
+            box-sizing: border-box;
+        }
+        button { 
+            width: 100%; 
+            padding: 14px; 
+            background: #667eea; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            font-size: 16px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            margin-top: 15px;
+        }
+        button:hover { background: #5568d3; }
+        label { display: block; margin-bottom: 8px; font-weight: bold; color: #333; }
+        .group-name { color: #667eea; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🎉 Du er inviteret!</h1>
+        <div class="info">
+            <p><strong>{{ inviter_name }}</strong> har inviteret dig til gruppen:</p>
+            <p class="group-name">📋 {{ group_name }}</p>
+        </div>
+        <form id="acceptForm">
+            <label for="username">Dit navn/kaldenavn:</label>
+            <input type="text" id="username" name="username" placeholder="fx. Peter" required>
+            <button type="submit">✓ Accepter invitation</button>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('acceptForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            
+            try {
+                const response = await fetch('/invite/{{ token }}/accept', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: username })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    localStorage.setItem('currentUser', username);
+                    window.location.href = '/';
+                } else {
+                    alert('Fejl: ' + data.message);
+                }
+            } catch (error) {
+                alert('Netværksfejl - prøv igen');
+            }
+        });
+    </script>
+</body>
+</html>

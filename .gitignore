@@ -1,0 +1,15 @@
+.env
+__pycache__/
+.venv/
+venv/
+.vscode/
+.idea/
+.pytest_cache/
+node_modules/
+.fly/
+.DS_Store
+Thumbs.db
+*.log
+data/*.json
+*.tmp
+.cache/
