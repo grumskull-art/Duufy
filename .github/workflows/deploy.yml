@@ -1,4 +1,4 @@
-# Duufy - Auto Deploy to Fly.io
+﻿# Duufy - Auto Deploy to Fly.io
 # Triggers on push to main branch
 
 name: Deploy to Fly.io
@@ -7,21 +7,53 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Deploy app
+  test-and-deploy:
+    name: Test & Deploy
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Test Supabase connection
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          pip install httpx -q
+          python -c "
+          import os, httpx, sys
+          url = os.getenv('SUPABASE_URL')
+          key = os.getenv('SUPABASE_ANON_KEY')
+          if not url or not key:
+              print('ERROR: Supabase secrets missing'); sys.exit(1)
+          try:
+              r = httpx.get(f'{url}/rest/v1/', headers={'apikey': key}, timeout=15)
+              print(f'Supabase OK (status: {r.status_code})')
+              if r.status_code not in [200, 401]: sys.exit(1)
+          except Exception as e:
+              print(f'Failed: {e}'); sys.exit(1)
+          "
 
       - name: Setup Fly.io CLI
         uses: superfly/flyctl-actions/setup-flyctl@master
 
       - name: Deploy to Fly.io
         run: flyctl deploy --remote-only
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      - name: Verify deployment
+        run: |
+          sleep 10
+          flyctl status
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
