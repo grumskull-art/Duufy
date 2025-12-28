@@ -371,6 +371,36 @@ async def add_item_route(item: Item):
         print(f"Error adding item: {e}")
         return {"message": "Serverfejl ved tilfÃ¸jelse", "item": item.dict()}
 
+@app.get("/items")
+async def get_items_flat_route():
+    from database import get_active_groups, get_group_items
+    try:
+        active = get_active_groups()
+        if not active:
+            return {
+                "items": [],
+                "groups": [],
+                "last_updated": datetime.utcnow().isoformat(),
+            }
+
+        merged = []
+        for gid in active:
+            for item in get_group_items(gid):
+                merged.append({**item, "group_id": gid})
+
+        return {
+            "items": merged,
+            "groups": active,
+            "last_updated": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        print(f"Error getting items: {e}")
+        return {
+            "items": [],
+            "groups": [],
+            "last_updated": datetime.utcnow().isoformat(),
+        }
+
 @app.get("/group/{group_id}/items")
 async def get_items_route(group_id: str):
     from database import get_group_items
