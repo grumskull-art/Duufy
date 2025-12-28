@@ -9,6 +9,7 @@ so the rest of the codebase does not need to change.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -23,6 +24,26 @@ from db import safe_read_json, safe_write_json
 # ----------------------------
 
 _JSON_FILE_DEFAULT = Path(__file__).parent / "data" / "groups.json"
+
+
+def ensure_data_files() -> None:
+    data_dir = _JSON_FILE_DEFAULT.parent
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = _JSON_FILE_DEFAULT
+    if not file_path.exists():
+        file_path.write_text("[]", encoding="utf-8")
+        return
+
+    content = file_path.read_text(encoding="utf-8")
+    if not content.strip():
+        file_path.write_text("[]", encoding="utf-8")
+        return
+
+    try:
+        json.loads(content)
+    except json.JSONDecodeError:
+        file_path.write_text("[]", encoding="utf-8")
 
 
 def _get_backend() -> str:
@@ -106,7 +127,10 @@ class JsonGroupStore:
     json_file: Path = _JSON_FILE_DEFAULT
 
     def _load(self) -> Dict[str, Any]:
-        return safe_read_json(self.json_file, {"groups": {}, "active_groups": []})
+        data = safe_read_json(self.json_file, {"groups": {}, "active_groups": []})
+        if not isinstance(data, dict):
+            return {"groups": {}, "active_groups": []}
+        return data
 
     def _save(self, data: Dict[str, Any]) -> None:
         safe_write_json(self.json_file, data)

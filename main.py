@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
+from database import ensure_data_files
 from db import safe_read_json, safe_write_json, safe_update_json
 import time
 import traceback
@@ -16,6 +17,11 @@ app = FastAPI(
     description="Do you often forget? Duufy don't - AI-powered shopping list",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    ensure_data_files()
 
 
 @app.exception_handler(Exception)
