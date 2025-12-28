@@ -1476,19 +1476,9 @@
         }
 
         async function loadCurrentGroup() {
-            if (!currentGroup) {
-                document.getElementById('itemsList').innerHTML = `
-                    <div class="empty-state">
-                        <div class="emoji">📋</div>
-                        <p>Vælg en gruppe først</p>
-                    </div>
-                `;
-                return;
-            }
-            
             try {
                 showLoading(true);
-                const response = await fetch(`${API_URL}/group/${currentGroup}/items`);
+                const response = await fetch(`${API_URL}/items`);
                 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}`);
