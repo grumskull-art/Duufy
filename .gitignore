@@ -23,3 +23,8 @@ data/*.json
 # Secrets / local certs
 *.pem
 
+
+# Local-only artifacts
+duufy-backup.bundle
+static_search.txt
+
