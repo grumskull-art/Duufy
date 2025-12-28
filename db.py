@@ -3,6 +3,7 @@ Database operations with file locking to prevent race conditions
 """
 import json
 import logging
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, Any
@@ -23,6 +24,17 @@ def get_file_lock(filepath: Path) -> FileLock:
             _locks[lock_path] = FileLock(lock_path, timeout=10)
         return _locks[lock_path]
 
+def _cleanup_tmp_files(filepath: Path) -> None:
+    directory = filepath.parent
+    if not directory.exists():
+        return
+    for pattern in (f"{filepath.name}.tmp.*", f"{filepath.name}.bak.tmp.*"):
+        for temp_path in directory.glob(pattern):
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+
 def safe_read_json(filepath: Path, default: Any = None) -> Any:
     """Thread-safe JSON file reading with file locking"""
     if not filepath.exists():
@@ -30,6 +42,7 @@ def safe_read_json(filepath: Path, default: Any = None) -> Any:
     
     lock = get_file_lock(filepath)
     with lock:
+        _cleanup_tmp_files(filepath)
         try:
             with open(filepath, 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -50,18 +63,36 @@ def safe_write_json(filepath: Path, data: Any) -> None:
     
     lock = get_file_lock(filepath)
     with lock:
+        _cleanup_tmp_files(filepath)
         if filepath.exists():
+            backup_path = Path(str(filepath) + ".bak")
+            backup_temp = Path(str(filepath) + f".bak.tmp.{os.getpid()}")
             try:
-                if filepath.stat().st_size > 0:
-                    backup_path = Path(str(filepath) + ".bak")
-                    shutil.copyfile(filepath, backup_path)
+                shutil.copyfile(filepath, backup_temp)
+                os.replace(backup_temp, backup_path)
+            except OSError as exc:
+                logger.warning("Failed to update JSON backup %s: %s", backup_path, exc)
+                try:
+                    if backup_temp.exists():
+                        backup_temp.unlink()
+                except OSError:
+                    pass
+
+        temp_file = filepath.with_name(f"{filepath.name}.tmp.{os.getpid()}")
+        try:
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_file, filepath)
+        except OSError as exc:
+            logger.error("Failed to write JSON file %s: %s", filepath, exc)
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
             except OSError:
                 pass
-        # Write to temp file first, then rename (atomic on most systems)
-        temp_file = filepath.with_suffix('.tmp')
-        with open(temp_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        temp_file.replace(filepath)
+            raise
 
 def safe_update_json(filepath: Path, update_func, default: Any = None) -> Any:
     """
