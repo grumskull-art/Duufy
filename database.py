@@ -10,13 +10,17 @@ so the rest of the codebase does not need to change.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
-from db import safe_read_json, safe_write_json
+from db import safe_read_json, get_file_lock, _cleanup_tmp_files
+
+logger = logging.getLogger(__name__)
 
 
 # ----------------------------
@@ -34,18 +38,56 @@ def ensure_data_files() -> None:
 
     for file_path in (_JSON_FILE_DEFAULT, _ITEMS_FILE_DEFAULT):
         if not file_path.exists():
-            file_path.write_text("[]", encoding="utf-8")
+            safe_write_json(file_path, [])
             continue
 
         content = file_path.read_text(encoding="utf-8")
         if not content.strip():
-            file_path.write_text("[]", encoding="utf-8")
+            safe_write_json(file_path, [])
             continue
 
         try:
             json.loads(content)
         except json.JSONDecodeError:
-            file_path.write_text("[]", encoding="utf-8")
+            safe_write_json(file_path, [])
+
+
+def safe_write_json(filepath: Path, data: Any) -> None:
+    """Thread-safe JSON file writing with file locking"""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+
+    lock = get_file_lock(filepath)
+    with lock:
+        _cleanup_tmp_files(filepath)
+        if filepath.exists():
+            backup_path = Path(str(filepath) + ".bak")
+            backup_temp = Path(str(filepath) + f".bak.tmp.{os.getpid()}")
+            try:
+                shutil.copyfile(filepath, backup_temp)
+                os.replace(backup_temp, backup_path)
+            except OSError as exc:
+                logger.warning("Failed to update JSON backup %s: %s", backup_path, exc)
+                try:
+                    if backup_temp.exists():
+                        backup_temp.unlink()
+                except OSError:
+                    pass
+
+        temp_file = filepath.with_name(f"{filepath.name}.tmp.{os.getpid()}")
+        try:
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_file, filepath)
+        except OSError as exc:
+            logger.error("Failed to write JSON file %s: %s", filepath, exc)
+            try:
+                if temp_file.exists():
+                    temp_file.unlink()
+            except OSError:
+                pass
+            raise
 
 
 def load_items() -> List[Dict[str, Any]]:
@@ -68,12 +110,7 @@ def load_items() -> List[Dict[str, Any]]:
 
 
 def save_items(items: List[Dict[str, Any]]) -> None:
-    file_path = _ITEMS_FILE_DEFAULT
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_file = file_path.with_suffix(".tmp")
-    with temp_file.open("w", encoding="utf-8") as f:
-        json.dump(items, f, indent=2, ensure_ascii=False)
-    temp_file.replace(file_path)
+    safe_write_json(_ITEMS_FILE_DEFAULT, items)
 
 
 def _get_backend() -> str:

@@ -59,40 +59,8 @@ def safe_read_json(filepath: Path, default: Any = None) -> Any:
 
 def safe_write_json(filepath: Path, data: Any) -> None:
     """Thread-safe JSON file writing with file locking"""
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    
-    lock = get_file_lock(filepath)
-    with lock:
-        _cleanup_tmp_files(filepath)
-        if filepath.exists():
-            backup_path = Path(str(filepath) + ".bak")
-            backup_temp = Path(str(filepath) + f".bak.tmp.{os.getpid()}")
-            try:
-                shutil.copyfile(filepath, backup_temp)
-                os.replace(backup_temp, backup_path)
-            except OSError as exc:
-                logger.warning("Failed to update JSON backup %s: %s", backup_path, exc)
-                try:
-                    if backup_temp.exists():
-                        backup_temp.unlink()
-                except OSError:
-                    pass
-
-        temp_file = filepath.with_name(f"{filepath.name}.tmp.{os.getpid()}")
-        try:
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temp_file, filepath)
-        except OSError as exc:
-            logger.error("Failed to write JSON file %s: %s", filepath, exc)
-            try:
-                if temp_file.exists():
-                    temp_file.unlink()
-            except OSError:
-                pass
-            raise
+    from database import safe_write_json as _safe_write_json
+    return _safe_write_json(filepath, data)
 
 def safe_update_json(filepath: Path, update_func, default: Any = None) -> Any:
     """
