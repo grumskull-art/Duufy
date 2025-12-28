@@ -231,6 +231,17 @@ class JsonGroupStore:
 
     def get_groups(self) -> List[Dict[str, Any]]:
         data = self._load()
+        items_data = safe_read_json(_ITEMS_FILE_DEFAULT, [])
+        items = items_data if isinstance(items_data, list) else []
+        item_counts: Dict[str, int] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            gid = item.get("group_id")
+            if not gid:
+                continue
+            item_counts[gid] = item_counts.get(gid, 0) + 1
+
         groups = []
         for gid, g in data.get("groups", {}).items():
             groups.append(
@@ -238,7 +249,7 @@ class JsonGroupStore:
                     "id": gid,
                     "name": g.get("name", gid),
                     "member_count": len(g.get("members", []) or []),
-                    "item_count": len(g.get("items", []) or []),
+                    "item_count": item_counts.get(gid, 0),
                 }
             )
         return groups
