@@ -42,6 +42,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
 
 @app.middleware("http")
+async def block_drive_paths(request: Request, call_next):
+    path = request.url.path
+    if ":" in path or "\\" in path or path.startswith("/.."):
+        return UTF8JSONResponse(
+            status_code=404,
+            content={"error": "Not found"},
+        )
+    return await call_next(request)
+
+@app.middleware("http")
 async def track_errors_and_performance(request: Request, call_next):
     """Automatically log errors and slow requests"""
     from analytics import log_error, track_event
