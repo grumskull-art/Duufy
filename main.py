@@ -423,6 +423,41 @@ async def get_items_flat_route():
             "last_updated": datetime.utcnow().isoformat(),
         }
 
+@app.delete("/items/{item_id}")
+async def delete_item_by_id_route(item_id: str):
+    from db import safe_read_json
+    from database import _ITEMS_FILE_DEFAULT, safe_write_json
+
+    def _pop_item(items, target_id):
+        for index, item in enumerate(items):
+            if item.get("id") == target_id:
+                return items.pop(index)
+        return None
+
+    try:
+        items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
+        if not isinstance(items, list):
+            items = []
+
+        deleted = _pop_item(items, item_id)
+        if not deleted:
+            return UTF8JSONResponse(
+                status_code=404,
+                content={"error": "Item not found", "id": item_id},
+            )
+
+        safe_write_json(_ITEMS_FILE_DEFAULT, items)
+        return UTF8JSONResponse(
+            status_code=200,
+            content={"message": "Item deleted", "item": deleted},
+        )
+    except Exception as e:
+        print(f"Error deleting item: {e}")
+        return UTF8JSONResponse(
+            status_code=500,
+            content={"error": "Internal Server Error", "id": item_id},
+        )
+
 @app.get("/group/{group_id}/items")
 async def get_items_route(group_id: str):
     from database import get_group_items

@@ -3,8 +3,6 @@ Database operations with file locking to prevent race conditions
 """
 import json
 import logging
-import os
-import shutil
 from pathlib import Path
 from typing import Dict, Any
 from filelock import FileLock
@@ -56,11 +54,6 @@ def safe_read_json(filepath: Path, default: Any = None) -> Any:
                 except (json.JSONDecodeError, OSError) as backup_exc:
                     logger.warning("Failed to read JSON backup %s: %s", backup_path, backup_exc)
             return default if default is not None else {}
-
-def safe_write_json(filepath: Path, data: Any) -> None:
-    """Thread-safe JSON file writing with file locking"""
-    from database import safe_write_json as _safe_write_json
-    return _safe_write_json(filepath, data)
 
 def safe_update_json(filepath: Path, update_func, default: Any = None) -> Any:
     """
