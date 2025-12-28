@@ -12,10 +12,15 @@ from db import safe_read_json, safe_write_json, safe_update_json
 import time
 import traceback
 
+class UTF8JSONResponse(JSONResponse):
+    media_type = "application/json; charset=utf-8"
+
+
 app = FastAPI(
     title="Duufy API",
     description="Do you often forget? Duufy don't - AI-powered shopping list",
-    version="1.0.0"
+    version="1.0.0",
+    default_response_class=UTF8JSONResponse,
 )
 
 
@@ -28,7 +33,7 @@ async def startup_event():
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Always return JSON for unhandled errors (prod-safe)."""
     # NOTE: Detailed stack traces are logged by middleware/uvicorn; do not leak internals to clients.
-    return JSONResponse(
+    return UTF8JSONResponse(
         status_code=500,
         content={"status": "error", "message": "Internal Server Error"},
     )
