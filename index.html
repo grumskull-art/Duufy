@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hey Lobs 🛒</title>
+    <title>Duufy 🛒</title>
     <style>
         * {
             margin: 0;
@@ -870,7 +870,7 @@
 <body>
     <div class="login-modal" id="loginModal">
         <div class="login-content">
-            <h1>Hey Lobs 🛒</h1>
+            <h1>Duufy 🛒</h1>
             <p>Hvad er dit kaldenavn?</p>
             <input type="text" id="loginInput" placeholder="Fx. Grums" autofocus maxlength="20">
             <button onclick="setUserName()">Start</button>
@@ -894,7 +894,7 @@
 
     <div class="container">
         <div class="header">
-            <h1>Hey Lobs 🛒</h1>
+            <h1>Duufy 🛒</h1>
             <p>Multi-gruppe indkøbsliste</p>
         </div>
 
@@ -1020,7 +1020,7 @@
         function initializeApp() {
             document.getElementById('userDisplay').textContent = `👤 ${currentUser}`;
             document.getElementById('userDisplay').onclick = changeUserName;
-            loadGroups();
+            loadGroups().then(loadCurrentGroup);
             initMicButton();
             requestMicrophonePermission();
         }
