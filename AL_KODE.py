@@ -1,5 +1,5 @@
 # ==================================================
-# HEY LOBS - KOMPLET KODEBASE
+# Duufy - KOMPLET KODEBASE
 # Genereret: 25. december 2025
 # Total: 2676 linjer Python kode
 # ==================================================
@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from typing import Optional
 from db import safe_read_json, safe_write_json, safe_update_json
 
-app = FastAPI(title="Hey Lobs API")
+app = FastAPI(title="Duufy API")
 
 # Enable CORS
 app.add_middleware(
@@ -557,7 +557,7 @@ def update_item_quantity(group_id: str, item_name: str, new_quantity: str):
 
 # ========== invitations.py (240 linjer) ==========
 """
-Invitation system for Hey Lobs
+Invitation system for Duufy
 Håndterer email-invitationer til grupper
 """
 
@@ -664,7 +664,7 @@ def send_invitation_email(to_email: str, inviter_name: str, group_name: str, inv
         
         html_content = f"""
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px;">
-            <h1 style="color: #667eea; text-align: center;">🛒 Hey Lobs</h1>
+            <h1 style="color: #667eea; text-align: center;">🛒 Duufy</h1>
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 15px; color: white; text-align: center;">
                 <h2 style="margin: 0 0 10px 0;">Du er inviteret!</h2>
                 <p style="margin: 0; font-size: 18px;">
@@ -694,9 +694,9 @@ def send_invitation_email(to_email: str, inviter_name: str, group_name: str, inv
         """
         
         resend.Emails.send({
-            "from": "Hey Lobs <noreply@resend.dev>",
+            "from": "Duufy <noreply@resend.dev>",
             "to": to_email,
-            "subject": f"🛒 {inviter_name} inviterer dig til {group_name} - Hey Lobs",
+            "subject": f"🛒 {inviter_name} inviterer dig til {group_name} - Duufy",
             "html": html_content
         })
         
