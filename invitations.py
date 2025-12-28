@@ -9,7 +9,8 @@ import secrets
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from db import safe_read_json, safe_write_json, safe_update_json
+from db import safe_read_json, safe_update_json
+from database import safe_write_json
 
 # Prøv at importere resend, men lad det fejle gracefully
 try:

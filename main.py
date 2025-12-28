@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
 from database import ensure_data_files
-from db import safe_read_json, safe_write_json, safe_update_json
+from db import safe_read_json, safe_update_json
 import time
 import traceback
 
