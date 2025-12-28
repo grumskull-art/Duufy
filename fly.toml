@@ -1,7 +1,7 @@
 # Fly.io Configuration for Duufy
 # Deploy: flyctl deploy
 
-app = 'duufy-app'
+app = "duufy-api"
 primary_region = 'ams'  # Amsterdam - closest to Denmark
 
 [build]
