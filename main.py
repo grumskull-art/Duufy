@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Body, BackgroundTasks, Request
+from fastapi import FastAPI, Body, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional
 from uuid import uuid4
 from database import ensure_data_files
-from db import safe_read_json, safe_update_json
+import json
 import time
 import traceback
 
@@ -36,11 +37,44 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     # NOTE: Detailed stack traces are logged by middleware/uvicorn; do not leak internals to clients.
     return UTF8JSONResponse(
         status_code=500,
-        content={"status": "error", "message": "Internal Server Error"},
+        content={"error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}},
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    detail = exc.detail
+    code = None
+    message = None
+    if isinstance(detail, dict):
+        code = detail.get("code")
+        message = detail.get("message")
+    elif isinstance(detail, str):
+        message = detail
+
+    if not code:
+        code = {
+            400: "BAD_REQUEST",
+            404: "NOT_FOUND",
+            409: "CONFLICT",
+            422: "INVALID_INPUT",
+            500: "INTERNAL_ERROR",
+        }.get(exc.status_code, "ERROR")
+    if not message:
+        message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+
+    return UTF8JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"code": code, "message": message}},
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return UTF8JSONResponse(
+        status_code=422,
+        content={"error": {"code": "INVALID_INPUT", "message": "Invalid input"}},
     )
 
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
-
 @app.middleware("http")
 async def block_drive_paths(request: Request, call_next):
     path = request.url.path
@@ -527,6 +561,7 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
             content={"error": "Internal Server Error", "id": item_id},
         )
 
+# TODO: Legacy group-scoped item endpoints (keep for old clients). /items is authoritative.
 @app.get("/group/{group_id}/items")
 async def get_items_route(group_id: str):
     from database import get_group_items
