@@ -476,6 +476,53 @@ async def delete_item_by_id_route(item_id: str):
             content={"error": "Internal Server Error", "id": item_id},
         )
 
+@app.patch("/items/{item_id}")
+async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
+    from database import load_items, save_items
+
+    def _find_item(items, target_id):
+        for item in items:
+            if item.get("id") == target_id:
+                return item
+        return None
+
+    try:
+        if not isinstance(payload, dict):
+            return UTF8JSONResponse(
+                status_code=400,
+                content={"error": "Invalid payload"},
+            )
+
+        items = load_items()
+        item = _find_item(items, item_id)
+        if not item:
+            return UTF8JSONResponse(
+                status_code=404,
+                content={"error": "Item not found", "id": item_id},
+            )
+
+        for key, value in payload.items():
+            if key == "group_id":
+                continue
+            if isinstance(value, str) and not value.strip():
+                return UTF8JSONResponse(
+                    status_code=400,
+                    content={"error": "Invalid payload"},
+                )
+            item[key] = value
+
+        save_items(items)
+        return UTF8JSONResponse(
+            status_code=200,
+            content={"message": "Item updated", "item": item},
+        )
+    except Exception as e:
+        print(f"Error updating item: {e}")
+        return UTF8JSONResponse(
+            status_code=500,
+            content={"error": "Internal Server Error", "id": item_id},
+        )
+
 @app.get("/group/{group_id}/items")
 async def get_items_route(group_id: str):
     from database import get_group_items
