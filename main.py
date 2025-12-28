@@ -362,24 +362,37 @@ async def delete_group_route(group_id: str):
 # VARER endpoints
 @app.post("/add_item")
 async def add_item_route(item: Item):
-    from database import add_item_to_groups
+    from database import get_active_groups, load_items, save_items
     try:
         if not item.name or not item.name.strip():
             return {"message": "Varenavn mangler", "item": item.dict()}
-        
-        # TilfÃ¸j til aktive grupper
-        success = add_item_to_groups(item.dict())
-        if success:
-            return {"message": "Vare tilfÃ¸jet!", "item": item.dict()}
-        else:
-            return {"message": "VÃ¦lg mindst Ã©n aktiv gruppe", "item": item.dict()}
+
+        active = get_active_groups()
+        if not active:
+            return {"message": "VÇŸ¶Ýlg mindst ÇŸ¶¸n aktiv gruppe", "item": item.dict()}
+
+        items = load_items()
+        timestamp = datetime.utcnow().isoformat()
+        for gid in active:
+            items.append(
+                {
+                    "name": item.name,
+                    "quantity": item.quantity,
+                    "added_by": item.added_by,
+                    "timestamp": timestamp,
+                    "group_id": gid,
+                }
+            )
+        save_items(items)
+
+        return {"message": "Vare tilfÇŸ¶÷jet!", "item": item.dict()}
     except Exception as e:
         print(f"Error adding item: {e}")
-        return {"message": "Serverfejl ved tilfÃ¸jelse", "item": item.dict()}
+        return {"message": "Serverfejl ved tilfÇŸ¶÷jelse", "item": item.dict()}
 
 @app.get("/items")
 async def get_items_flat_route():
-    from database import get_active_groups, get_group_items
+    from database import get_active_groups, load_items
     try:
         active = get_active_groups()
         if not active:
@@ -389,10 +402,8 @@ async def get_items_flat_route():
                 "last_updated": datetime.utcnow().isoformat(),
             }
 
-        merged = []
-        for gid in active:
-            for item in get_group_items(gid):
-                merged.append({**item, "group_id": gid})
+        items = load_items()
+        merged = [item for item in items if item.get("group_id") in active]
 
         return {
             "items": merged,

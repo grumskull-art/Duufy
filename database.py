@@ -24,26 +24,55 @@ from db import safe_read_json, safe_write_json
 # ----------------------------
 
 _JSON_FILE_DEFAULT = Path(__file__).parent / "data" / "groups.json"
+_ITEMS_FILE_DEFAULT = Path(__file__).parent / "data" / "items.json"
 
 
 def ensure_data_files() -> None:
     data_dir = _JSON_FILE_DEFAULT.parent
     data_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = _JSON_FILE_DEFAULT
+    for file_path in (_JSON_FILE_DEFAULT, _ITEMS_FILE_DEFAULT):
+        if not file_path.exists():
+            file_path.write_text("[]", encoding="utf-8")
+            continue
+
+        content = file_path.read_text(encoding="utf-8")
+        if not content.strip():
+            file_path.write_text("[]", encoding="utf-8")
+            continue
+
+        try:
+            json.loads(content)
+        except json.JSONDecodeError:
+            file_path.write_text("[]", encoding="utf-8")
+
+
+def load_items() -> List[Dict[str, Any]]:
+    file_path = _ITEMS_FILE_DEFAULT
     if not file_path.exists():
-        file_path.write_text("[]", encoding="utf-8")
-        return
+        return []
 
     content = file_path.read_text(encoding="utf-8")
     if not content.strip():
-        file_path.write_text("[]", encoding="utf-8")
-        return
+        return []
 
     try:
-        json.loads(content)
+        data = json.loads(content)
     except json.JSONDecodeError:
-        file_path.write_text("[]", encoding="utf-8")
+        return []
+
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def save_items(items: List[Dict[str, Any]]) -> None:
+    file_path = _ITEMS_FILE_DEFAULT
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_file = file_path.with_suffix(".tmp")
+    with temp_file.open("w", encoding="utf-8") as f:
+        json.dump(items, f, indent=2, ensure_ascii=False)
+    temp_file.replace(file_path)
 
 
 def _get_backend() -> str:
