@@ -23,8 +23,9 @@ from db import safe_read_json, safe_write_json
 # Configuration
 # ----------------------------
 
-_JSON_FILE_DEFAULT = Path(__file__).parent / "data" / "groups.json"
-_ITEMS_FILE_DEFAULT = Path(__file__).parent / "data" / "items.json"
+_DATA_DIR_DEFAULT = Path("/data") if Path("/data").exists() else Path(__file__).parent / "data"
+_JSON_FILE_DEFAULT = _DATA_DIR_DEFAULT / "groups.json"
+_ITEMS_FILE_DEFAULT = _DATA_DIR_DEFAULT / "items.json"
 
 
 def ensure_data_files() -> None:
