@@ -1,9 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accept invitation - Hey Lobs</title>
+    <title>Accept invitation - DUUFY</title>
     <style>
         body { 
             font-family: Arial, sans-serif; 
@@ -50,15 +50,15 @@
 </head>
 <body>
     <div class="card">
-        <h1>🎉 Du er inviteret!</h1>
+        <h1>ðŸŽ‰ Du er inviteret!</h1>
         <div class="info">
             <p><strong>{{ inviter_name }}</strong> har inviteret dig til gruppen:</p>
-            <p class="group-name">📋 {{ group_name }}</p>
+            <p class="group-name">ðŸ“‹ {{ group_name }}</p>
         </div>
         <form id="acceptForm">
             <label for="username">Dit navn/kaldenavn:</label>
             <input type="text" id="username" name="username" placeholder="fx. Peter" required>
-            <button type="submit">✓ Accepter invitation</button>
+            <button type="submit">âœ“ Accepter invitation</button>
         </form>
     </div>
 
@@ -83,9 +83,10 @@
                     alert('Fejl: ' + data.message);
                 }
             } catch (error) {
-                alert('Netværksfejl - prøv igen');
+                alert('NetvÃ¦rksfejl - prÃ¸v igen');
             }
         });
     </script>
 </body>
 </html>
+
