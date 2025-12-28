@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Body, BackgroundTasks, Request
 from fastapi.responses import FileResponse
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from models import Item
 from datetime import datetime
@@ -15,6 +16,16 @@ app = FastAPI(
     description="Do you often forget? Duufy don't - AI-powered shopping list",
     version="1.0.0"
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Always return JSON for unhandled errors (prod-safe)."""
+    # NOTE: Detailed stack traces are logged by middleware/uvicorn; do not leak internals to clients.
+    return JSONResponse(
+        status_code=500,
+        content={"status": "error", "message": "Internal Server Error"},
+    )
 
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
 
