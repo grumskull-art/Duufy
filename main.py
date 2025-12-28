@@ -110,6 +110,8 @@ async def track_errors_and_performance(request: Request, call_next):
         
         return response
         
+    except HTTPException:
+        raise
     except Exception as e:
         # Automatically log all unhandled exceptions
         duration = time.time() - start_time
@@ -306,6 +308,8 @@ async def create_group_route(group_name: str, owner_id: str):
         
         group_id = create_group(group_name, owner_id)
         return {"message": f"Gruppe '{group_name}' oprettet!", "group_id": group_id, "status": "success"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error creating group: {e}")
         return {"message": "Serverfejl ved oprettelse", "status": "error"}
@@ -317,6 +321,8 @@ async def get_groups_route():
         groups = get_groups()
         active = get_active_groups()
         return {"groups": groups, "active_groups": active}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting groups: {e}")
         return {"groups": [], "active_groups": []}
@@ -337,6 +343,8 @@ async def add_member_route(group_id: str, member_name: str):
             return {"message": f"{member_name} tilfÃ¸jet!", "status": "success"}
         else:
             return {"message": f"{member_name} er allerede medlem", "status": "info"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error adding member: {e}")
         return {"message": "Serverfejl ved tilfÃ¸jelse", "status": "error"}
@@ -348,6 +356,8 @@ async def get_members_route(group_id: str):
         members = get_group_members(group_id)
         owner = get_group_owner(group_id)
         return {"members": members, "count": len(members), "owner": owner}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting members: {e}")
         return {"members": [], "count": 0, "owner": None}
@@ -366,6 +376,8 @@ async def remove_member_route(group_id: str, member_name: str, owner_check: str 
             return {"message": f"{member_name} fjernet!", "status": "success"}
         else:
             return {"message": "Fejl ved fjernelse", "status": "error"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error removing member: {e}")
         return {"message": "Fejl ved fjernelse", "status": "error"}
@@ -383,6 +395,8 @@ async def set_active_groups_route(group_ids: list = Body(...)):
             return {"message": f"{len(group_ids)} gruppe(r) aktiveret!", "status": "success"}
         else:
             return {"message": "Fejl ved aktivering", "status": "error"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error setting active groups: {e}")
         return {"message": "Fejl", "status": "error"}
@@ -393,6 +407,8 @@ async def get_active_groups_route():
     try:
         active = get_active_groups()
         return {"active_groups": active}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting active groups: {e}")
         return {"active_groups": []}
@@ -409,6 +425,8 @@ async def delete_group_route(group_id: str):
             return {"message": "Gruppe slettet!", "status": "success"}
         else:
             return {"message": "Gruppe ikke fundet", "status": "error"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error deleting group: {e}")
         return {"message": "Fejl ved sletning", "status": "error"}
@@ -450,6 +468,8 @@ async def add_item_route(item: Item):
         save_items(items)
 
         return {"message": "Vare tilfÇŸ¶÷jet!", "item": saved_item}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error adding item: {e}")
         return {"message": "Serverfejl ved tilfÇŸ¶÷jelse", "item": item.dict()}
@@ -474,6 +494,8 @@ async def get_items_flat_route():
             "groups": active,
             "last_updated": datetime.utcnow().isoformat(),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting items: {e}")
         return {
@@ -507,6 +529,8 @@ async def delete_item_by_id_route(item_id: str):
             status_code=200,
             content={"message": "Item deleted", "item": deleted},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error deleting item: {e}")
         raise HTTPException(
@@ -554,6 +578,8 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
             status_code=200,
             content={"message": "Item updated", "item": item},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error updating item: {e}")
         raise HTTPException(
@@ -568,6 +594,8 @@ async def get_items_route(group_id: str):
     try:
         items = get_group_items(group_id)
         return {"items": items, "last_updated": datetime.utcnow().isoformat()}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting items: {e}")
         return {"items": [], "last_updated": datetime.utcnow().isoformat()}
@@ -581,6 +609,8 @@ async def delete_item_route(group_id: str, item_name: str):
             return {"message": "Vare slettet!", "status": "success"}
         else:
             return {"message": "Vare ikke fundet", "status": "error"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error deleting item: {e}")
         return {"message": "Serverfejl ved sletning", "status": "error"}
@@ -594,6 +624,8 @@ async def update_item_quantity_route(group_id: str, item_name: str, quantity: st
             return {"message": "MÃ¦ngde opdateret!", "status": "success"}
         else:
             return {"message": "Vare ikke fundet", "status": "error"}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error updating quantity: {e}")
         return {"message": "Serverfejl ved opdatering", "status": "error"}
@@ -624,6 +656,8 @@ async def send_invitation_route(request: InviteRequest):
             base_url=base_url
         )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error sending invitation: {e}")
         return {"success": False, "message": "Fejl ved afsendelse af invitation"}
@@ -659,6 +693,8 @@ async def accept_invitation_route(token: str, request: AcceptInviteRequest):
     try:
         result = accept_invitation(token, request.name)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error accepting invitation: {e}")
         return {"success": False, "message": "Fejl ved accept af invitation"}
@@ -670,6 +706,8 @@ async def get_group_invitations_route(group_id: str):
     try:
         pending = get_pending_invitations(group_id)
         return {"invitations": pending, "count": len(pending)}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error getting invitations: {e}")
         return {"invitations": [], "count": 0}
@@ -878,6 +916,8 @@ async def track_analytics_event(
         track_event(user_id, event, data)
         track_user_activity(user_id)
         return {"success": True}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -892,6 +932,8 @@ async def track_signup(
     try:
         track_user_signup(user_id, email, metadata)
         return {"success": True, "message": "Signup tracked"}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -908,6 +950,8 @@ async def log_app_error(
     try:
         log_error(error_type, message, user_id, stack_trace, metadata)
         return {"success": True, "message": "Error logged"}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -921,6 +965,8 @@ async def track_user_churn(
     try:
         track_user_churn(user_id, reason)
         return {"success": True, "message": "Churn tracked"}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1111,6 +1157,8 @@ async def get_analytics_dashboard():
         """
         
         return HTMLResponse(content=html)
+    except HTTPException:
+        raise
     except Exception as e:
         return {"error": str(e)}
 
@@ -1162,6 +1210,8 @@ async def report_problem(report: ProblemReport):
             "message": "Tak for din feedback! Vi kigger på det.",
             "support_id": f"DUF-{int(time.time())}"
         }
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -1199,5 +1249,7 @@ async def validate_parse_result(
         })
         
         return {"success": True, "message": "Feedback modtaget"}
+    except HTTPException:
+        raise
     except Exception as e:
         return {"success": False, "error": str(e)}
