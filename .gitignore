@@ -19,3 +19,7 @@ data/*.json
 /data/*.tmp.*
 *.lock
 
+
+# Secrets / local certs
+*.pem
+
