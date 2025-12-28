@@ -79,9 +79,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def block_drive_paths(request: Request, call_next):
     path = request.url.path
     if ":" in path or "\\" in path or path.startswith("/.."):
-        return UTF8JSONResponse(
+        raise HTTPException(
             status_code=404,
-            content={"error": "Not found"},
+            detail={"code": "NOT_FOUND", "message": "Not found"},
         )
     return await call_next(request)
 
@@ -423,14 +423,14 @@ async def add_item_route(item: Item):
 
         active = get_active_groups()
         if not active:
-            return UTF8JSONResponse(
+            raise HTTPException(
                 status_code=400,
-                content={"error": "No active group selected"},
+                detail={"code": "NO_ACTIVE_GROUP_SELECTED", "message": "No active group selected"},
             )
         if len(active) > 1:
-            return UTF8JSONResponse(
+            raise HTTPException(
                 status_code=400,
-                content={"error": "Multiple active groups selected"},
+                detail={"code": "MULTIPLE_ACTIVE_GROUPS_SELECTED", "message": "Multiple active groups selected"},
             )
 
         items = load_items()
@@ -497,9 +497,9 @@ async def delete_item_by_id_route(item_id: str):
 
         deleted = _pop_item(items, item_id)
         if not deleted:
-            return UTF8JSONResponse(
+            raise HTTPException(
                 status_code=404,
-                content={"error": "Item not found", "id": item_id},
+                detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
             )
 
         save_items(items)
@@ -509,9 +509,9 @@ async def delete_item_by_id_route(item_id: str):
         )
     except Exception as e:
         print(f"Error deleting item: {e}")
-        return UTF8JSONResponse(
+        raise HTTPException(
             status_code=500,
-            content={"error": "Internal Server Error", "id": item_id},
+            detail={"code": "INTERNAL_ERROR", "message": "Internal Server Error"},
         )
 
 @app.patch("/items/{item_id}")
@@ -526,26 +526,26 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
 
     try:
         if not isinstance(payload, dict):
-            return UTF8JSONResponse(
+            raise HTTPException(
                 status_code=400,
-                content={"error": "Invalid payload"},
+                detail={"code": "INVALID_INPUT", "message": "Invalid payload"},
             )
 
         items = load_items()
         item = _find_item(items, item_id)
         if not item:
-            return UTF8JSONResponse(
+            raise HTTPException(
                 status_code=404,
-                content={"error": "Item not found", "id": item_id},
+                detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
             )
 
         for key, value in payload.items():
             if key == "group_id":
                 continue
             if isinstance(value, str) and not value.strip():
-                return UTF8JSONResponse(
+                raise HTTPException(
                     status_code=400,
-                    content={"error": "Invalid payload"},
+                    detail={"code": "INVALID_INPUT", "message": "Invalid payload"},
                 )
             item[key] = value
 
@@ -556,9 +556,9 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
         )
     except Exception as e:
         print(f"Error updating item: {e}")
-        return UTF8JSONResponse(
+        raise HTTPException(
             status_code=500,
-            content={"error": "Internal Server Error", "id": item_id},
+            detail={"code": "INTERNAL_ERROR", "message": "Internal Server Error"},
         )
 
 # TODO: Legacy group-scoped item endpoints (keep for old clients). /items is authoritative.
