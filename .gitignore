@@ -13,3 +13,9 @@ Thumbs.db
 data/*.json
 *.tmp
 .cache/
+
+# Duufy local storage backups
+/data/*.bak
+/data/*.tmp.*
+*.lock
+

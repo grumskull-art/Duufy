@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel
 from typing import Optional
+from uuid import uuid4
 from database import ensure_data_files
 from db import safe_read_json, safe_update_json
 import time
@@ -374,23 +375,33 @@ async def add_item_route(item: Item):
 
         active = get_active_groups()
         if not active:
-            return {"message": "VÇŸ¶Ýlg mindst ÇŸ¶¸n aktiv gruppe", "item": item.dict()}
+            return UTF8JSONResponse(
+                status_code=400,
+                content={"error": "No active group selected"},
+            )
+        if len(active) > 1:
+            return UTF8JSONResponse(
+                status_code=400,
+                content={"error": "Multiple active groups selected"},
+            )
 
         items = load_items()
         timestamp = datetime.utcnow().isoformat()
-        for gid in active:
-            items.append(
-                {
-                    "name": item.name,
-                    "quantity": item.quantity,
-                    "added_by": item.added_by,
-                    "timestamp": timestamp,
-                    "group_id": gid,
-                }
-            )
+        item_data = item.dict()
+        item_id = item_data.get("id") or uuid4().hex
+        group_id = active[0]
+        saved_item = {
+            "id": item_id,
+            "name": item_data.get("name"),
+            "quantity": item_data.get("quantity"),
+            "added_by": item_data.get("added_by"),
+            "timestamp": timestamp,
+            "group_id": group_id,
+        }
+        items.append(saved_item)
         save_items(items)
 
-        return {"message": "Vare tilfÇŸ¶÷jet!", "item": item.dict()}
+        return {"message": "Vare tilfÇŸ¶÷jet!", "item": saved_item}
     except Exception as e:
         print(f"Error adding item: {e}")
         return {"message": "Serverfejl ved tilfÇŸ¶÷jelse", "item": item.dict()}
@@ -425,8 +436,7 @@ async def get_items_flat_route():
 
 @app.delete("/items/{item_id}")
 async def delete_item_by_id_route(item_id: str):
-    from db import safe_read_json
-    from database import _ITEMS_FILE_DEFAULT, safe_write_json
+    from database import load_items, save_items
 
     def _pop_item(items, target_id):
         for index, item in enumerate(items):
@@ -435,9 +445,7 @@ async def delete_item_by_id_route(item_id: str):
         return None
 
     try:
-        items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
-        if not isinstance(items, list):
-            items = []
+        items = load_items()
 
         deleted = _pop_item(items, item_id)
         if not deleted:
@@ -446,7 +454,7 @@ async def delete_item_by_id_route(item_id: str):
                 content={"error": "Item not found", "id": item_id},
             )
 
-        safe_write_json(_ITEMS_FILE_DEFAULT, items)
+        save_items(items)
         return UTF8JSONResponse(
             status_code=200,
             content={"message": "Item deleted", "item": deleted},

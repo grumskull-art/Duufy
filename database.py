@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
+from uuid import uuid4
 
 from db import safe_read_json, get_file_lock, _cleanup_tmp_files
 
@@ -91,21 +92,18 @@ def safe_write_json(filepath: Path, data: Any) -> None:
 
 
 def load_items() -> List[Dict[str, Any]]:
-    file_path = _ITEMS_FILE_DEFAULT
-    if not file_path.exists():
-        return []
-
-    content = file_path.read_text(encoding="utf-8")
-    if not content.strip():
-        return []
-
-    try:
-        data = json.loads(content)
-    except json.JSONDecodeError:
-        return []
-
+    data = safe_read_json(_ITEMS_FILE_DEFAULT, [])
     if not isinstance(data, list):
         return []
+
+    changed = False
+    for item in data:
+        if isinstance(item, dict) and not item.get("id"):
+            item["id"] = uuid4().hex
+            changed = True
+
+    if changed:
+        safe_write_json(_ITEMS_FILE_DEFAULT, data)
     return data
 
 
