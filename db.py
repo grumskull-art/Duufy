@@ -2,6 +2,8 @@
 Database operations with file locking to prevent race conditions
 """
 import json
+import logging
+import shutil
 from pathlib import Path
 from typing import Dict, Any
 from filelock import FileLock
@@ -10,6 +12,7 @@ import threading
 # Thread-safe locks for each file
 _locks = {}
 _lock_mutex = threading.Lock()
+logger = logging.getLogger(__name__)
 
 def get_file_lock(filepath: Path) -> FileLock:
     """Get or create a FileLock for a given file"""
@@ -27,8 +30,19 @@ def safe_read_json(filepath: Path, default: Any = None) -> Any:
     
     lock = get_file_lock(filepath)
     with lock:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read JSON file %s: %s", filepath, exc)
+            backup_path = Path(str(filepath) + ".bak")
+            if backup_path.exists():
+                try:
+                    with open(backup_path, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except (json.JSONDecodeError, OSError) as backup_exc:
+                    logger.warning("Failed to read JSON backup %s: %s", backup_path, backup_exc)
+            return default if default is not None else {}
 
 def safe_write_json(filepath: Path, data: Any) -> None:
     """Thread-safe JSON file writing with file locking"""
@@ -36,6 +50,13 @@ def safe_write_json(filepath: Path, data: Any) -> None:
     
     lock = get_file_lock(filepath)
     with lock:
+        if filepath.exists():
+            try:
+                if filepath.stat().st_size > 0:
+                    backup_path = Path(str(filepath) + ".bak")
+                    shutil.copyfile(filepath, backup_path)
+            except OSError:
+                pass
         # Write to temp file first, then rename (atomic on most systems)
         temp_file = filepath.with_suffix('.tmp')
         with open(temp_file, 'w', encoding='utf-8') as f:
