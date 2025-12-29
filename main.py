@@ -556,6 +556,7 @@ async def delete_item_by_id_route(item_id: str):
 @app.patch("/items/{item_id}")
 async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
     from database import load_items, save_items
+    from errors import api_error, internal_error, item_not_found
 
     def _find_item(items, target_id):
         for item in items:
@@ -565,27 +566,18 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
 
     try:
         if not isinstance(payload, dict):
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "INVALID_INPUT", "message": "Invalid payload"},
-            )
+            return api_error("INVALID_INPUT", "Invalid payload", 400)
 
         items = load_items()
         item = _find_item(items, item_id)
         if not item:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
-            )
+            return item_not_found("Item not found")
 
         for key, value in payload.items():
-            if key == "group_id":
+            if key in ("id", "group_id"):
                 continue
             if isinstance(value, str) and not value.strip():
-                raise HTTPException(
-                    status_code=400,
-                    detail={"code": "INVALID_INPUT", "message": "Invalid payload"},
-                )
+                return api_error("INVALID_INPUT", "Invalid payload", 400)
             item[key] = value
 
         save_items(items)
@@ -597,9 +589,9 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
         raise
     except Exception as e:
         print(f"Error updating item: {e}")
-        raise HTTPException(
+        return UTF8JSONResponse(
             status_code=500,
-            detail={"code": "INTERNAL_ERROR", "message": "Internal Server Error"},
+            content={"error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}},
         )
 
 # TODO: Legacy group-scoped item endpoints (keep for old clients). /items is authoritative.
