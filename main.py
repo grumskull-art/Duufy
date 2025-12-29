@@ -46,8 +46,13 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     code = None
     message = None
     if isinstance(detail, dict):
-        code = detail.get("code")
-        message = detail.get("message")
+        error = detail.get("error")
+        if isinstance(error, dict):
+            code = error.get("code")
+            message = error.get("message")
+        else:
+            code = detail.get("code")
+            message = detail.get("message")
     elif isinstance(detail, str):
         message = detail
 
@@ -72,6 +77,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return UTF8JSONResponse(
         status_code=422,
         content={"error": {"code": "INVALID_INPUT", "message": "Invalid input"}},
+    )
+
+def raise_http_error(status_code: int, code: str, message: str) -> None:
+    raise HTTPException(
+        status_code=status_code,
+        detail={"error": {"code": code, "message": message}},
     )
 
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
@@ -436,22 +447,22 @@ async def delete_group_route(group_id: str):
 async def add_item_route(item: Item):
     from database import get_active_groups, load_items, save_items
     try:
-        if not item.name or not item.name.strip():
-            return {"message": "Varenavn mangler", "item": item.dict()}
+        if item is None or not isinstance(item, Item):
+            raise_http_error(400, "INVALID_INPUT", "Invalid payload")
+        if not isinstance(item.name, str) or not item.name.strip():
+            raise_http_error(400, "INVALID_INPUT", "Varenavn mangler")
 
         active = get_active_groups()
+        if not isinstance(active, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
         if not active:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "NO_ACTIVE_GROUP_SELECTED", "message": "No active group selected"},
-            )
+            raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "No active group selected")
         if len(active) > 1:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "MULTIPLE_ACTIVE_GROUPS_SELECTED", "message": "Multiple active groups selected"},
-            )
+            raise_http_error(400, "MULTIPLE_ACTIVE_GROUPS_SELECTED", "Multiple active groups selected")
 
         items = load_items()
+        if not isinstance(items, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
         timestamp = datetime.utcnow().isoformat()
         item_data = item.dict()
         item_id = item_data.get("id") or uuid4().hex
@@ -467,19 +478,23 @@ async def add_item_route(item: Item):
         items.append(saved_item)
         save_items(items)
 
+        # NOTE: Success response shape unchanged for clients.
         return {"message": "Vare tilfÇŸ¶÷jet!", "item": saved_item}
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error adding item: {e}")
-        return {"message": "Serverfejl ved tilfÇŸ¶÷jelse", "item": item.dict()}
+        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved tilfoejelse")
 
 @app.get("/items")
 async def get_items_flat_route():
     from database import get_active_groups, load_items
     try:
         active = get_active_groups()
+        if not isinstance(active, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
         if not active:
+            # NOTE: Success response shape unchanged for clients.
             return {
                 "items": [],
                 "groups": [],
@@ -487,8 +502,11 @@ async def get_items_flat_route():
             }
 
         items = load_items()
+        if not isinstance(items, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
         merged = [item for item in items if item.get("group_id") in active]
 
+        # NOTE: Success response shape unchanged for clients.
         return {
             "items": merged,
             "groups": active,
@@ -498,11 +516,7 @@ async def get_items_flat_route():
         raise
     except Exception as e:
         print(f"Error getting items: {e}")
-        return {
-            "items": [],
-            "groups": [],
-            "last_updated": datetime.utcnow().isoformat(),
-        }
+        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved hentning af varer")
 
 @app.delete("/items/{item_id}")
 async def delete_item_by_id_route(item_id: str):
@@ -515,16 +529,18 @@ async def delete_item_by_id_route(item_id: str):
         return None
 
     try:
+        if not item_id or not str(item_id).strip():
+            raise_http_error(400, "INVALID_INPUT", "Invalid item id")
         items = load_items()
+        if not isinstance(items, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
 
         deleted = _pop_item(items, item_id)
         if not deleted:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
-            )
+            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
 
         save_items(items)
+        # NOTE: Success response shape unchanged for clients.
         return UTF8JSONResponse(
             status_code=200,
             content={"message": "Item deleted", "item": deleted},
@@ -533,11 +549,7 @@ async def delete_item_by_id_route(item_id: str):
         raise
     except Exception as e:
         print(f"Error deleting item: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "INTERNAL_ERROR", "message": "Internal Server Error"},
-        )
-
+        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
 @app.patch("/items/{item_id}")
 async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
     from database import load_items, save_items
