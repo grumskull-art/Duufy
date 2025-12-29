@@ -3,7 +3,6 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from models import Item
 from datetime import datetime
 from pathlib import Path
@@ -41,8 +40,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         content={"error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}},
     )
 
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
     detail = exc.detail
     code = None
     message = None
@@ -61,7 +60,6 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         code = {
             400: "BAD_REQUEST",
             404: "NOT_FOUND",
-            405: "METHOD_NOT_ALLOWED",
             409: "CONFLICT",
             422: "INVALID_INPUT",
             500: "INTERNAL_ERROR",
@@ -449,18 +447,15 @@ async def delete_group_route(group_id: str):
 async def add_item_route(item: Item):
     from database import get_active_groups, load_items, save_items
     try:
-        if item is None or not isinstance(item, Item):
-            raise_http_error(400, "INVALID_INPUT", "Invalid payload")
-        if not isinstance(item.name, str) or not item.name.strip():
-            raise_http_error(400, "INVALID_INPUT", "Varenavn mangler")
-
+       
+       
         active = get_active_groups()
         if not isinstance(active, list):
             raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
         if not active:
             raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "No active group selected")
-        if len(active) > 1:
-            raise_http_error(400, "MULTIPLE_ACTIVE_GROUPS_SELECTED", "Multiple active groups selected")
+        raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "Select exactly one active group")
+
 
         items = load_items()
         if not isinstance(items, list):
@@ -523,7 +518,6 @@ async def get_items_flat_route():
 @app.delete("/items/{item_id}")
 async def delete_item_by_id_route(item_id: str):
     from database import load_items, save_items
-    from errors import api_error, internal_error, item_not_found
 
     def _pop_item(items, target_id):
         for index, item in enumerate(items):
@@ -533,14 +527,14 @@ async def delete_item_by_id_route(item_id: str):
 
     try:
         if not item_id or not str(item_id).strip():
-            return api_error("INVALID_INPUT", "Invalid item id", 400)
+            raise_http_error(400, "INVALID_INPUT", "Invalid item id")
         items = load_items()
         if not isinstance(items, list):
-            return internal_error("Invalid items storage")
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
 
         deleted = _pop_item(items, item_id)
         if not deleted:
-            return item_not_found("Item not found")
+            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
 
         save_items(items)
         # NOTE: Success response shape unchanged for clients.
@@ -552,11 +546,11 @@ async def delete_item_by_id_route(item_id: str):
         raise
     except Exception as e:
         print(f"Error deleting item: {e}")
-        return internal_error("Serverfejl ved sletning")
+        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
 @app.patch("/items/{item_id}")
 async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
     from database import load_items, save_items
-    from errors import api_error, internal_error, item_not_found
+    from errors import api_error, internal_error
 
     def _find_item(items, target_id):
         for item in items:
@@ -571,10 +565,13 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
         items = load_items()
         item = _find_item(items, item_id)
         if not item:
-            return item_not_found("Item not found")
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
+            )
 
         for key, value in payload.items():
-            if key in ("id", "group_id"):
+            if key == "group_id":
                 continue
             if isinstance(value, str) and not value.strip():
                 return api_error("INVALID_INPUT", "Invalid payload", 400)
@@ -585,14 +582,9 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
             status_code=200,
             content={"message": "Item updated", "item": item},
         )
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"Error updating item: {e}")
-        return UTF8JSONResponse(
-            status_code=500,
-            content={"error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}},
-        )
+        return internal_error("Internal Server Error")
 
 # TODO: Legacy group-scoped item endpoints (keep for old clients). /items is authoritative.
 @app.get("/group/{group_id}/items")
