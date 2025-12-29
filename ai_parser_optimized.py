@@ -258,10 +258,14 @@ def local_parse(text: str) -> list[ParsedItem]:
 
 async def ai_parse(text: str) -> list[ParsedItem]:
     """Async AI parsing with Claude."""
-    if not ANTHROPIC_AVAILABLE or not (key := os.getenv('ANTHROPIC_API_KEY')):
+    if not _anthropic_available():
         return []
-    
+
+    if not (key := os.getenv('ANTHROPIC_API_KEY')):
+        return []
+
     client = AsyncAnthropic(api_key=key)
+
     
     prompt = f"""Du parser utydelig dansk tale til JSON produkter.
 
