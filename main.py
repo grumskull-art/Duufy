@@ -3,6 +3,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from models import Item
 from datetime import datetime
 from pathlib import Path
@@ -40,8 +41,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         content={"error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}},
     )
 
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     detail = exc.detail
     code = None
     message = None
@@ -60,6 +61,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         code = {
             400: "BAD_REQUEST",
             404: "NOT_FOUND",
+            405: "METHOD_NOT_ALLOWED",
             409: "CONFLICT",
             422: "INVALID_INPUT",
             500: "INTERNAL_ERROR",
@@ -521,6 +523,7 @@ async def get_items_flat_route():
 @app.delete("/items/{item_id}")
 async def delete_item_by_id_route(item_id: str):
     from database import load_items, save_items
+    from errors import api_error, internal_error, item_not_found
 
     def _pop_item(items, target_id):
         for index, item in enumerate(items):
@@ -530,14 +533,14 @@ async def delete_item_by_id_route(item_id: str):
 
     try:
         if not item_id or not str(item_id).strip():
-            raise_http_error(400, "INVALID_INPUT", "Invalid item id")
+            return api_error("INVALID_INPUT", "Invalid item id", 400)
         items = load_items()
         if not isinstance(items, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
+            return internal_error("Invalid items storage")
 
         deleted = _pop_item(items, item_id)
         if not deleted:
-            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
+            return item_not_found("Item not found")
 
         save_items(items)
         # NOTE: Success response shape unchanged for clients.
@@ -549,7 +552,7 @@ async def delete_item_by_id_route(item_id: str):
         raise
     except Exception as e:
         print(f"Error deleting item: {e}")
-        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
+        return internal_error("Serverfejl ved sletning")
 @app.patch("/items/{item_id}")
 async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
     from database import load_items, save_items
