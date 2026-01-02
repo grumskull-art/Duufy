@@ -553,7 +553,7 @@ ALLOWED_FIELDS = {"name", "quantity", "added_by"}
 
 
 class ItemPatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
     name: Optional[str] = None
     quantity: Optional[str] = None
     added_by: Optional[str] = None
@@ -589,7 +589,7 @@ async def update_item_by_id_route(item_id: str, payload: ItemPatch = Body(...)):
                 detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
             )
 
-        updates = payload.model_dump(exclude_unset=True)
+        updates = payload.model_dump(exclude_unset=True, by_alias=False)
         if not updates:
             return api_error("EMPTY_PATCH", "Empty patch payload", 400)
 
