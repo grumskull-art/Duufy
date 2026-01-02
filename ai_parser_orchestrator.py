@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ai_parser_contract import (
     PARSE_RESULT_ADAPTER,
-    ParsedItem,
     ParseResult,
     fallback_parse,
 )
