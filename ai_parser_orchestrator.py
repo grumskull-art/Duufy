@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ai_provider import get_ai_parser
 from ai_parser_ai_contract import AIParsePayload, validate_ai_payload
 from ai_parser_contract import (
     PARSE_RESULT_ADAPTER,
@@ -53,7 +54,14 @@ def ai_parse_stub(raw: str) -> object:
 def parse_input(raw: str, *, force_ai: bool = False) -> ParseResult:
     if should_use_ai(raw, force_ai=force_ai):
         try:
-            result = ai_parse_stub(raw)
+            parser = get_ai_parser()
+            result = parser(raw)
+        except RuntimeError as exc:
+            if str(exc) != "AI_DISABLED":
+                raise
+            result = fallback_parse(raw)
+            result.warnings.append("AI_DISABLED")
+            return PARSE_RESULT_ADAPTER.validate_python(result)
         except NotImplementedError:
             raise
         except Exception:
