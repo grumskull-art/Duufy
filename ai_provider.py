@@ -2,6 +2,8 @@ import importlib
 import os
 from typing import Callable
 
+from ai_config import load_ai_config
+
 
 def is_ai_enabled() -> bool:
     value = os.getenv("DUUFY_AI_ENABLED", "")
@@ -13,7 +15,8 @@ def _not_implemented(_: str) -> object:
 
 
 def get_ai_parser() -> Callable[[str], object]:
-    if not is_ai_enabled():
+    config = load_ai_config()
+    if not config.enabled:
         raise RuntimeError("AI_DISABLED")
 
     try:
