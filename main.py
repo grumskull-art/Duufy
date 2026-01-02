@@ -73,10 +73,15 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     )
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return UTF8JSONResponse(
+async def request_validation_error_handler(request, exc: RequestValidationError):
+    return JSONResponse(
         status_code=422,
-        content={"error": {"code": "INVALID_INPUT", "message": "Invalid input"}},
+        content={
+            "error": {
+                "code": "INVALID_INPUT",
+                "message": "Invalid input",
+            }
+        },
     )
 
 def raise_http_error(status_code: int, code: str, message: str) -> None:
