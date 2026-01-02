@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from models import Item
 from datetime import datetime
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from uuid import uuid4
 from database import ensure_data_files
@@ -547,9 +547,21 @@ async def delete_item_by_id_route(item_id: str):
     except Exception as e:
         print(f"Error deleting item: {e}")
         raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
+
+
+ALLOWED_FIELDS = {"name", "quantity", "added_by"}
+
+
+class ItemPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: Optional[str] = None
+    quantity: Optional[str] = None
+    added_by: Optional[str] = None
+
+
 @app.patch("/items/{item_id}")
-async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
-    from database import load_items, save_items
+async def update_item_by_id_route(item_id: str, payload: ItemPatch = Body(...)):
+    from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT
     from errors import api_error, internal_error
 
     def _find_item(items, target_id):
@@ -559,10 +571,17 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
         return None
 
     try:
-        if not isinstance(payload, dict):
-            return api_error("INVALID_INPUT", "Invalid payload", 400)
+        items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
+        if not isinstance(items, list):
+            items = []
+        changed = False
+        for stored in items:
+            if isinstance(stored, dict) and not stored.get("id"):
+                stored["id"] = uuid4().hex
+                changed = True
+        if changed:
+            safe_write_json(_ITEMS_FILE_DEFAULT, items)
 
-        items = load_items()
         item = _find_item(items, item_id)
         if not item:
             raise HTTPException(
@@ -570,18 +589,22 @@ async def update_item_by_id_route(item_id: str, payload: dict = Body(...)):
                 detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
             )
 
-        for key, value in payload.items():
-            if key == "group_id":
-                continue
+        updates = payload.model_dump(exclude_unset=True)
+        if not updates:
+            return api_error("EMPTY_PATCH", "Empty patch payload", 400)
+
+        for key, value in updates.items():
             if isinstance(value, str) and not value.strip():
                 return api_error("INVALID_INPUT", "Invalid payload", 400)
             item[key] = value
 
-        save_items(items)
+        safe_write_json(_ITEMS_FILE_DEFAULT, items)
         return UTF8JSONResponse(
             status_code=200,
             content={"message": "Item updated", "item": item},
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error updating item: {e}")
         return internal_error("Internal Server Error")
