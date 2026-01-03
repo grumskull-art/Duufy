@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Body, Request, HTTPException
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
@@ -565,7 +566,7 @@ class ItemPatch(BaseModel):
 
 
 @app.patch("/items/{item_id}")
-async def update_item_by_id_route(item_id: str, payload: ItemPatch = Body(...)):
+async def update_item_by_id_route(item_id: str, request: Request, payload: ItemPatch = Body(...)):
     from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT
     from errors import api_error, internal_error
 
@@ -594,7 +595,20 @@ async def update_item_by_id_route(item_id: str, payload: ItemPatch = Body(...)):
                 detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
             )
 
-        updates = payload.model_dump(exclude_unset=True, by_alias=False)
+        import json
+        try:
+            body = await request.body()
+            if body.strip() in (b"{}", b"{ }", b"{\n}", b"{\r\n}"):
+                return api_error("EMPTY_PATCH", "Empty patch payload", 400)
+            # If it's valid JSON, do a stricter check (covers whitespace variants)
+            raw = json.loads(body) if body else None
+            if isinstance(raw, dict) and not raw:
+                return api_error("EMPTY_PATCH", "Empty patch payload", 400)
+        except Exception:
+            # Let FastAPI/validation/global handlers deal with invalid/empty JSON
+            raise
+
+        updates = payload.model_dump(exclude_unset=True)
         if not updates:
             return api_error("EMPTY_PATCH", "Empty patch payload", 400)
 
@@ -608,7 +622,7 @@ async def update_item_by_id_route(item_id: str, payload: ItemPatch = Body(...)):
             status_code=200,
             content={"message": "Item updated", "item": item},
         )
-    except HTTPException:
+    except (HTTPException, StarletteHTTPException):
         raise
     except Exception as e:
         print(f"Error updating item: {e}")
