@@ -479,6 +479,29 @@
             z-index: 2;
         }
 
+        .item-delete-desktop {
+            display: none;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+            padding: 4px 6px;
+            opacity: 0.6;
+        }
+
+        .item-delete-desktop:hover {
+            opacity: 1;
+        }
+
+        @media (pointer: fine) {
+            .item-delete-desktop {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+
         /* Swipe container */
         .item {
             position: relative;
@@ -1502,6 +1525,7 @@
                                         <span>👤 ${item.added_by}</span>
                                     </div>
                                 </div>
+                                <button class="item-delete-desktop" onclick='deleteItem(${JSON.stringify(item.name)})'>&#128465;</button>
                             </div>
                         </div>
                     `).join('');
