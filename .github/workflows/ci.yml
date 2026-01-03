@@ -51,36 +51,28 @@ jobs:
 
       # 6. Test Supabase forbindelse (mock)
       - name: Test Supabase connection
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        if: secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != ''
         run: |
+          pip install httpx -q
           python - <<'PY'
-          import os
-          import httpx
-
+          import os, httpx, sys
           url = os.getenv("SUPABASE_URL")
           key = os.getenv("SUPABASE_ANON_KEY")
-
           if not url or not key:
-              print("WARN: Supabase secrets ikke konfigureret - springer test over")
+              print("Supabase secrets missing, skipping")
               raise SystemExit(0)
-
-          # Test at vi kan naa Supabase
           try:
-              response = httpx.get(
-                  f"{url}/rest/v1/",
-                  headers={"apikey": key},
-                  timeout=10,
-              )
-              if response.status_code in [200, 401]:
-                  print("OK: Supabase forbindelse OK")
-              else:
-                  print(f"WARN: Uventet status: {response.status_code}")
+              r = httpx.get(f"{url}/rest/v1/", headers={"apikey": key}, timeout=15)
+              print(f"Supabase OK (status: {r.status_code})")
+              if r.status_code not in (200, 401):
+                  raise SystemExit(1)
           except Exception as exc:
-              print(f"ERROR: Fejl: {exc}")
+              print(f"Failed: {exc}")
               raise SystemExit(1)
           PY
+
+
+
 
   # Security check (valgfrit)
   security:
