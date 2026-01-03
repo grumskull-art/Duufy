@@ -1,4 +1,5 @@
 """Optimized FastAPI endpoint with async support."""
+from main import app
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from ai_parser_optimized import smart_parse_async, ParseResult
