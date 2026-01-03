@@ -55,32 +55,32 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          python -c "
+          python - <<'PY'
           import os
           import httpx
-          
-          url = os.getenv('SUPABASE_URL')
-          key = os.getenv('SUPABASE_ANON_KEY')
-          
+
+          url = os.getenv("SUPABASE_URL")
+          key = os.getenv("SUPABASE_ANON_KEY")
+
           if not url or not key:
-              print('⚠️  Supabase secrets ikke konfigureret - springer test over')
-              exit(0)
-          
-          # Test at vi kan nå Supabase
+              print("WARN: Supabase secrets ikke konfigureret - springer test over")
+              raise SystemExit(0)
+
+          # Test at vi kan naa Supabase
           try:
               response = httpx.get(
-                  f'{url}/rest/v1/',
-                  headers={'apikey': key},
-                  timeout=10
+                  f"{url}/rest/v1/",
+                  headers={"apikey": key},
+                  timeout=10,
               )
               if response.status_code in [200, 401]:
-                  print('✅ Supabase forbindelse OK')
+                  print("OK: Supabase forbindelse OK")
               else:
-                  print(f'⚠️  Uventet status: {response.status_code}')
-          except Exception as e:
-              print(f'❌ Fejl: {e}')
-              exit(1)
-          "
+                  print(f"WARN: Uventet status: {response.status_code}")
+          except Exception as exc:
+              print(f"ERROR: Fejl: {exc}")
+              raise SystemExit(1)
+          PY
 
   # Security check (valgfrit)
   security:
