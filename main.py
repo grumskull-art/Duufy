@@ -460,7 +460,8 @@ async def add_item_route(item: Item):
             raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
         if not active:
             raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "No active group selected")
-        raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "Select exactly one active group")
+        if len(active) != 1:
+            raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "Select exactly one active group")
 
 
         items = load_items()
@@ -593,12 +594,8 @@ async def update_item_by_id_route(item_id: str, request: Request, payload: ItemP
             return api_error("ITEM_NOT_FOUND", "Item not found", 404)
 
         import json
-        try:
-            body = await request.body()
-            raw = json.loads(body) if body else None
-        except Exception:
-            # Let FastAPI/validation/global handlers deal with invalid/empty JSON
-            raise
+        body = await request.body()
+        raw = json.loads(body) if body else None
         if isinstance(raw, dict) and not raw:
             return api_error("EMPTY_PATCH", "Empty patch payload", 400)
 
@@ -616,7 +613,7 @@ async def update_item_by_id_route(item_id: str, request: Request, payload: ItemP
             status_code=200,
             content={"message": "Item updated", "item": item},
         )
-    except (HTTPException, StarletteHTTPException):
+    except (HTTPException, StarletteHTTPException, RequestValidationError):
         raise
     except Exception as e:
         print(f"Error updating item: {e}")
