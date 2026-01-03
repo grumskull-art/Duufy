@@ -3,4 +3,6 @@ exclude =
     .git,
     __pycache__,
     legacy/*,
-    main_broken.py
+    main_broken.py,
+    ai_parser_optimized.py,
+    endpoint_optimized.py
