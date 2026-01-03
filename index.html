@@ -2022,6 +2022,8 @@
 
         let isRecording = false;
         let recordedTranscript = '';
+        let lastSpeechText = '';
+        let lastSpeechAlternatives = [];
         
         // Lydeffekter med Web Audio API
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -2118,6 +2120,8 @@
             
             isRecording = true;
             recordedTranscript = '';
+            lastSpeechText = '';
+            lastSpeechAlternatives = [];
             
             // Opdater begge knapper - behold mikrofon-emoji, bare tilføj listening class
             if (micBtn) {
@@ -2135,6 +2139,13 @@
             
             recognition.onresult = (event) => {
                 let interimTranscript = '';
+                const lastResult = event.results[event.results.length - 1];
+                const alts = Array.from(lastResult)
+                    .map((alt) => (alt.transcript || '').trim())
+                    .filter(Boolean);
+                const text = alts[0] || '';
+                lastSpeechText = text;
+                lastSpeechAlternatives = [...new Set(alts)].slice(0, 5);
                 
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const transcript = event.results[i][0].transcript || '';
@@ -2150,6 +2161,9 @@
                 const currentText = (recordedTranscript + interimTranscript).trim();
                 if (currentText) {
                     itemNameInput.value = currentText;
+                    if (!lastSpeechText) {
+                        lastSpeechText = currentText;
+                    }
                 }
             };
 
@@ -2233,21 +2247,25 @@
             }
             
             // Parse og tilføj varer via backend AI
-            const spokenText = itemNameInput.value.trim();
+            const spokenText = (lastSpeechText || itemNameInput.value).trim();
             if (spokenText) {
-                parseViaBackend(spokenText);
+                parseViaBackend(spokenText, lastSpeechAlternatives);
             }
         }
         
         // Brug backend AI til at parse stemme-input
-        async function parseViaBackend(text) {
+        async function parseViaBackend(text, textAlternatives = []) {
             const itemNameInput = document.getElementById('itemName');
             
             try {
                 const response = await fetch(`${API_URL}/ai/parse`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text, force_ai: false })
+                    body: JSON.stringify({
+                        text: text,
+                        text_alternatives: textAlternatives,
+                        force_ai: false
+                    })
                 });
                 
                 if (!response.ok) {
