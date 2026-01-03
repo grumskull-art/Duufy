@@ -1,10 +1,4 @@
 <!DOCTYPE html>
-                    body: JSON.stringify({
-                        text,
-                        text_alternatives: textAlternatives,
-                        force_ai: false
-                    })
-<!DOCTYPE html>
 <html lang="da">
 <head>
     <meta charset="UTF-8">
@@ -802,6 +796,16 @@
             stopVoice();
             showToast('🔄 Behandler...');
             
+            const cleaned = (text || "")
+                .toLowerCase()
+                .replace(/[^\p{L}\p{N}\s]/gu, "")
+                .trim();
+            const STOP_WORDS = ["og", "en", "et", "eller", "bare", "så", "øh"];
+            if (cleaned.length < 5 || STOP_WORDS.includes(cleaned)) {
+                alert("Sig fx: 'jeg skal bruge mælk og æg'");
+                return;
+            }
+
             try {
                 const response = await fetch(API_BASE + '/ai/parse', {
                     method: 'POST',

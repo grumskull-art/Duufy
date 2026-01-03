@@ -2257,12 +2257,22 @@
         async function parseViaBackend(text, textAlternatives = []) {
             const itemNameInput = document.getElementById('itemName');
             
+            const cleaned = (text || "")
+                .toLowerCase()
+                .replace(/[^\p{L}\p{N}\s]/gu, "")
+                .trim();
+            const STOP_WORDS = ["og", "en", "et", "eller", "bare", "så", "øh"];
+            if (cleaned.length < 5 || STOP_WORDS.includes(cleaned)) {
+                alert("Sig fx: 'jeg skal bruge mælk og æg'");
+                return;
+            }
+
             try {
                 const response = await fetch(`${API_URL}/ai/parse`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        text: text,
+                        text: cleaned,
                         text_alternatives: textAlternatives,
                         force_ai: false
                     })
