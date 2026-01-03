@@ -590,23 +590,17 @@ async def update_item_by_id_route(item_id: str, request: Request, payload: ItemP
 
         item = _find_item(items, item_id)
         if not item:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "ITEM_NOT_FOUND", "message": "Item not found"},
-            )
+            return api_error("ITEM_NOT_FOUND", "Item not found", 404)
 
         import json
         try:
             body = await request.body()
-            if body.strip() in (b"{}", b"{ }", b"{\n}", b"{\r\n}"):
-                return api_error("EMPTY_PATCH", "Empty patch payload", 400)
-            # If it's valid JSON, do a stricter check (covers whitespace variants)
             raw = json.loads(body) if body else None
-            if isinstance(raw, dict) and not raw:
-                return api_error("EMPTY_PATCH", "Empty patch payload", 400)
         except Exception:
             # Let FastAPI/validation/global handlers deal with invalid/empty JSON
             raise
+        if isinstance(raw, dict) and not raw:
+            return api_error("EMPTY_PATCH", "Empty patch payload", 400)
 
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
