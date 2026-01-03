@@ -17,6 +17,10 @@ try:
 except ImportError:
     ANTHROPIC_AVAILABLE = False
 
+def _anthropic_available() -> bool:
+    return False
+
+
 Category = Literal['mejeri', 'kød', 'fisk', 'bager', 'grønt', 'frugt', 'drikkevarer', 'kolonial', 'husholdning', 'æg', 'andet']
 Confidence = Literal['high', 'low', 'none']
 

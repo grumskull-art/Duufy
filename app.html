@@ -756,11 +756,17 @@
             };
             
             recognition.onresult = (event) => {
-                const transcript = event.results[0][0].transcript;
-                document.getElementById('voiceText').textContent = transcript;
+                const lastResult = event.results[event.results.length - 1];
+                const alts = Array.from(lastResult)
+                    .map((alt) => (alt.transcript || '').trim())
+                    .filter(Boolean);
+                const text = alts[0] || '';
+                const textAlternatives = [...new Set(alts)].slice(0, 5);
+
+                document.getElementById('voiceText').textContent = text;
                 
-                if (event.results[0].isFinal) {
-                    parseVoiceInput(transcript);
+                if (lastResult.isFinal) {
+                    parseVoiceInput(text, textAlternatives);
                 }
             };
             
@@ -786,15 +792,29 @@
             }
         }
         
-        async function parseVoiceInput(text) {
+        async function parseVoiceInput(text, textAlternatives = []) {
             stopVoice();
             showToast('🔄 Behandler...');
             
+            const cleaned = (text || "")
+                .toLowerCase()
+                .replace(/[^\p{L}\p{N}\s]/gu, "")
+                .trim();
+            const STOP_WORDS = ["og", "en", "et", "eller", "bare", "så", "øh"];
+            if (cleaned.length < 5 || STOP_WORDS.includes(cleaned)) {
+                alert("Sig fx: 'jeg skal bruge mælk og æg'");
+                return;
+            }
+
             try {
                 const response = await fetch(API_BASE + '/ai/parse', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text })
+                    body: JSON.stringify({
+                        text,
+                        text_alternatives: textAlternatives,
+                        force_ai: false
+                    })
                 });
                 
                 const result = await response.json();
@@ -858,4 +878,4 @@
         }
     </script>
 </body>
-</html>
+                    body: JSON.stringify({
