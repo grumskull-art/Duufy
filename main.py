@@ -91,6 +91,18 @@ def raise_http_error(status_code: int, code: str, message: str) -> None:
         detail={"error": {"code": code, "message": message}},
     )
 
+def get_single_active_group_id() -> str:
+    from database import get_active_groups
+
+    active = get_active_groups()
+    if not isinstance(active, list):
+        raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
+    if not active:
+        raise_http_error(400, "NO_ACTIVE_GROUP", "No active group")
+    if len(active) > 1:
+        raise_http_error(400, "MULTIPLE_ACTIVE_GROUPS", "Multiple active groups")
+    return active[0]
+
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
 @app.middleware("http")
 async def block_drive_paths(request: Request, call_next):
@@ -521,6 +533,32 @@ async def get_items_flat_route():
     except Exception as e:
         print(f"Error getting items: {e}")
         raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved hentning af varer")
+
+@app.delete("/items")
+async def clear_items_route():
+    from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT
+    try:
+        group_id = get_single_active_group_id()
+        items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
+        if not isinstance(items, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
+
+        remaining = [
+            item for item in items
+            if not isinstance(item, dict) or item.get("group_id") != group_id
+        ]
+        deleted_count = len(items) - len(remaining)
+        safe_write_json(_ITEMS_FILE_DEFAULT, remaining)
+        return {
+            "message": "Cleared items",
+            "group_id": group_id,
+            "deleted_count": deleted_count,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error clearing items: {e}")
+        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
 
 @app.delete("/items/{item_id}")
 async def delete_item_by_id_route(item_id: str):
