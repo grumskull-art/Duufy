@@ -465,6 +465,23 @@
             box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
         }
 
+        .delete-mode-btn {
+            background: white;
+            color: #ef4444;
+            border: 1px solid #ef4444;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .delete-mode-btn.active {
+            background: #fee2e2;
+            color: #b91c1c;
+        }
+
         .inline-hint {
             font-size: 12px;
             color: #6b7280;
@@ -523,29 +540,6 @@
             flex: 1;
             position: relative;
             z-index: 2;
-        }
-
-        .item-delete-desktop {
-            display: none;
-            background: transparent;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            line-height: 1;
-            padding: 4px 6px;
-            opacity: 0.6;
-        }
-
-        .item-delete-desktop:hover {
-            opacity: 1;
-        }
-
-        @media (pointer: fine) {
-            .item-delete-desktop {
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-            }
         }
 
         /* Swipe container */
@@ -1025,6 +1019,7 @@
                 <div class="items-title">
                     <h2>Varer</h2>
                     <button type="button" class="clear-cart-btn" onclick="clearCart()">Ryd kurv</button>
+                    <button type="button" class="delete-mode-btn" id="deleteModeBtn" onclick="toggleDeleteMode()">Slet</button>
                 </div>
                 <span class="item-count" id="itemCount">0</span>
             </div>
@@ -1549,16 +1544,42 @@
         }
 
         let clearHintTimeout = null;
-        function showClearHint(text, type) {
+        let deleteMode = false;
+        function showClearHint(text, type, timeoutMs = 2500) {
             const hint = document.getElementById('clearHint');
             if (!hint) return;
-            hint.textContent = text;
-            hint.className = `inline-hint ${type} show`;
             if (clearHintTimeout) clearTimeout(clearHintTimeout);
-            clearHintTimeout = setTimeout(() => {
+            if (!text) {
                 hint.className = 'inline-hint';
                 hint.textContent = '';
-            }, 2500);
+                return;
+            }
+            hint.textContent = text;
+            hint.className = `inline-hint ${type} show`;
+            if (timeoutMs && timeoutMs > 0) {
+                clearHintTimeout = setTimeout(() => {
+                    hint.className = 'inline-hint';
+                    hint.textContent = '';
+                }, timeoutMs);
+            }
+        }
+
+        function hideClearHint() {
+            showClearHint('', '', 0);
+        }
+
+        function toggleDeleteMode() {
+            deleteMode = !deleteMode;
+            const btn = document.getElementById('deleteModeBtn');
+            if (btn) {
+                btn.textContent = deleteMode ? 'Annuller' : 'Slet';
+                btn.classList.toggle('active', deleteMode);
+            }
+            if (deleteMode) {
+                showClearHint('Klik paa en vare for at slette', 'error', 0);
+            } else {
+                hideClearHint();
+            }
         }
 
         async function clearCart() {
@@ -1620,7 +1641,7 @@
                 
                 if (data.items && data.items.length > 0) {
                     itemsList.innerHTML = `<div class="swipe-hint">← swipe for købt • hold højre 1 sek = slet →</div>` + data.items.map(item => `
-                        <div class="item" data-item-name="${item.name}" data-quantity="${item.quantity}">
+                        <div class="item" data-item-id="${item.id}" data-item-name="${item.name}" data-quantity="${item.quantity}">
                             <div class="swipe-bg swipe-bg-left">✓ Købt</div>
                             <div class="swipe-bg swipe-bg-right">🗑️ Slet</div>
                             <div class="item-inner">
@@ -1631,7 +1652,6 @@
                                         <span>👤 ${item.added_by}</span>
                                     </div>
                                 </div>
-                                <button class="item-delete-desktop" onclick='deleteItem(${JSON.stringify(item.name)})'>&#128465;</button>
                             </div>
                         </div>
                     `).join('');
@@ -1665,21 +1685,24 @@
         // Pending deletes (undo-funktionalitet)
         const pendingDeletes = new Map();
         
-        async function deleteItem(itemName, skipUndo = false) {
-            if (!currentGroup) return;
+        async function deleteItem(itemId, itemName, skipUndo = false) {
+            if (!itemId) {
+                showMessage('? Fejl ved sletning', 'error');
+                return;
+            }
             
-            const item = document.querySelector(`.item[data-item-name="${itemName}"]`);
+            const item = document.querySelector(`.item[data-item-id="${itemId}"]`);
             if (!item) return;
             
             // Hvis allerede pending, annuller
-            if (pendingDeletes.has(itemName)) {
-                cancelDelete(itemName);
+            if (pendingDeletes.has(itemId)) {
+                cancelDelete(itemId);
                 return;
             }
             
             // Hvis skipUndo (efter timeout), slet direkte
             if (skipUndo) {
-                await actuallyDeleteItem(itemName);
+                await actuallyDeleteItem(itemId);
                 return;
             }
             
@@ -1692,31 +1715,31 @@
                 item.classList.add('fade-out');
                 
                 setTimeout(async () => {
-                    pendingDeletes.delete(itemName);
-                    await actuallyDeleteItem(itemName);
+                    pendingDeletes.delete(itemId);
+                    await actuallyDeleteItem(itemId);
                 }, 500);
             }, 2500);
             
-            pendingDeletes.set(itemName, { timeoutId, item });
+            pendingDeletes.set(itemId, { timeoutId, item });
             
             // Klik på item for at fortryde
-            item.onclick = () => cancelDelete(itemName);
+            item.onclick = () => cancelDelete(itemId);
         }
         
-        function cancelDelete(itemName) {
-            const pending = pendingDeletes.get(itemName);
+        function cancelDelete(itemId) {
+            const pending = pendingDeletes.get(itemId);
             if (pending) {
                 clearTimeout(pending.timeoutId);
                 pending.item.classList.remove('pending-delete', 'fade-out');
                 pending.item.onclick = null;
-                pendingDeletes.delete(itemName);
+                pendingDeletes.delete(itemId);
                 if (navigator.vibrate) navigator.vibrate([20, 50, 20]);
             }
         }
         
-        async function actuallyDeleteItem(itemName) {
+        async function actuallyDeleteItem(itemId) {
             try {
-                const response = await fetch(`${API_URL}/group/${currentGroup}/item/${encodeURIComponent(itemName)}`, {
+                const response = await fetch(`${API_URL}/items/${itemId}`, {
                     method: 'DELETE'
                 });
                 
@@ -1745,8 +1768,17 @@
                 let holdStartTime = 0;
                 
                 const inner = item.querySelector('.item-inner');
+                const itemId = item.dataset.itemId;
                 const itemName = item.dataset.itemName;
                 const rightBg = item.querySelector('.swipe-bg-right');
+
+                item.addEventListener('click', (e) => {
+                    if (!deleteMode) return;
+                    if (!window.matchMedia('(pointer: fine)').matches) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    deleteItem(itemId, itemName, true);
+                });
                 
                 item.addEventListener('touchstart', (e) => {
                     startX = e.touches[0].clientX;
@@ -1808,7 +1840,7 @@
                                 inner.style.transform = 'translateX(100%)';
                                 
                                 setTimeout(() => {
-                                    deleteItem(itemName);
+                                    deleteItem(itemId, itemName);
                                 }, 300);
                             }, 1000);
                         }
