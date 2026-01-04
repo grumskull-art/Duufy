@@ -1042,6 +1042,15 @@
     <script>
         // Brug samme host som browseren (virker på både PC og telefon)
         const API_URL = `${window.location.protocol}//${window.location.host}`;
+        const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
+        function debugLog(label, data) {
+            if (!DEBUG) return;
+            if (typeof data === 'undefined') {
+                console.log(label);
+            } else {
+                console.log(label, data);
+            }
+        }
         let currentGroup = null;
         let activeGroups = [];
         let currentUser = null;
@@ -2411,33 +2420,42 @@
             // Parse og tilføj varer via backend AI
             const spokenText = (lastSpeechText || itemNameInput.value).trim();
             if (spokenText) {
-                parseViaBackend(spokenText, lastSpeechAlternatives);
+                debugLog('DEBUG raw transcript:', spokenText);
+                parseViaBackend(spokenText, lastSpeechAlternatives, currentUser);
             }
         }
         
         // Brug backend AI til at parse stemme-input
-        async function parseViaBackend(text, textAlternatives = []) {
-            const itemNameInput = document.getElementById('itemName');
+        async function parseViaBackend(text, textAlternatives = [], addedBy = currentUser) {
             
-            const cleaned = (text || "")
+            const rawText = (text || "").trim();
+            const cleaned = rawText
                 .toLowerCase()
                 .replace(/[^\p{L}\p{N}\s]/gu, "")
                 .trim();
+            debugLog('DEBUG cleaned transcript:', cleaned);
+            if (Array.isArray(textAlternatives) && textAlternatives.length > 0) {
+                debugLog('DEBUG textAlternatives:', textAlternatives);
+            }
             const STOP_WORDS = ["og", "en", "et", "eller", "bare", "så", "øh"];
-            if (cleaned.length < 5 || STOP_WORDS.includes(cleaned)) {
-                alert("Sig fx: 'jeg skal bruge mælk og æg'");
+            const tokens = cleaned.split(/\s+/).filter(Boolean);
+            const nonStop = tokens.filter(token => !STOP_WORDS.includes(token));
+            if (!cleaned || nonStop.length === 0) {
+                showMessage("Sig fx: 'jeg skal bruge mælk og æg'", 'error');
                 return;
             }
 
             try {
+                const payload = {
+                    text: rawText,
+                    text_alternatives: textAlternatives,
+                    added_by: addedBy || currentUser
+                };
+                debugLog('DEBUG /ai/parse payload:', payload);
                 const response = await fetch(`${API_URL}/ai/parse`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: cleaned,
-                        text_alternatives: textAlternatives,
-                        force_ai: false
-                    })
+                    body: JSON.stringify(payload)
                 });
                 
                 if (!response.ok) {
@@ -2445,32 +2463,22 @@
                 }
                 
                 const result = await response.json();
-                console.log('Backend parse result:', result);
+                debugLog('DEBUG /ai/parse response:', result);
                 
-                if (result.items && result.items.length > 0) {
-                    // Konverter til frontend format
-                    const items = result.items.map(item => ({
-                        name: item.item,
-                        quantity: item.quantity
-                    }));
-                    
-                    if (items.length > 1) {
-                        addMultipleItems(items);
-                        itemNameInput.value = '';
-                    } else {
-                        itemNameInput.value = items[0].name;
-                        document.getElementById('itemQuantity').value = items[0].quantity;
-                        setTimeout(() => {
-                            document.getElementById('itemForm').dispatchEvent(new Event('submit'));
-                        }, 200);
-                    }
+                const parsedItems = Array.isArray(result.items) ? result.items : [];
+                const items = parsedItems.map(item => ({
+                    name: item.name || item.item || '',
+                    quantity: item.quantity || '1'
+                })).filter(item => item.name);
+                
+                if (items.length > 0) {
+                    await addMultipleItems(items);
                 } else {
-                    // Fallback til lokal parsing hvis backend ikke fandt noget
-                    fallbackToLocalParse(text);
+                    showMessage('Ingen varer fundet', 'error');
                 }
             } catch (error) {
-                console.log('Backend parse error, using local:', error);
-                fallbackToLocalParse(text);
+                console.log('Backend parse error:', error);
+                showMessage('Kunne ikke parse input', 'error');
             }
         }
         
@@ -2902,3 +2910,4 @@
     </script>
 </body>
 </html>
+

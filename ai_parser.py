@@ -108,9 +108,207 @@ def fuzzy_correct(word: str) -> str:
 
 # Mængde-mønster - mere præcist
 AMOUNT_PATTERN = re.compile(
-    r"^(\d+(?:[.,]\d+)?)\s*(l|liter|ml|dl|cl|stk|stykker?|pakke|pakker|pk|poser?|g|gram|kg|kilo|fl|flaske|flasker|ds|dåse|dåser|bundt|net)?\s+",
+    r"^(\d+(?:[.,]\d+)?)\s*(l|liter|ml|dl|cl|stk|stykker?|pakke|pakker|pk|poser?|g|gram|kg|kilo|fl|flaske|flasker|ds|d\u00e5se|d\u00e5ser|bundt|net)?\s+",
     re.IGNORECASE
 )
+
+STOPWORDS = {
+    "og", "en", "et", "nej", "bare", "tak", "\u00f8h", "\u00f8hm", "ehm",
+}
+
+NUMBER_WORDS = {
+    "en": "1",
+    "et": "1",
+    "to": "2",
+    "tre": "3",
+    "fire": "4",
+    "fem": "5",
+    "seks": "6",
+    "syv": "7",
+    "otte": "8",
+    "ni": "9",
+    "ti": "10",
+}
+
+UNIT_ALIASES = {
+    "liter": {"liter", "l"},
+    "g": {"g", "gram"},
+    "kg": {"kg", "kilo"},
+    "pakke": {"pakke", "pakker", "pk"},
+    "pose": {"pose", "poser"},
+    "d\u00e5se": {"d\u00e5se", "d\u00e5ser", "ds"},
+}
+
+def _parse_number(token: str) -> Optional[str]:
+    if token in NUMBER_WORDS:
+        return NUMBER_WORDS[token]
+    if re.match(r"^\d+(?:[.,]\d+)?$", token):
+        return token.replace(",", ".")
+    return None
+
+def _is_unit(token: str) -> bool:
+    return any(token in variants for variants in UNIT_ALIASES.values())
+
+def _normalize_unit(token: str, num: str) -> str:
+    if token in UNIT_ALIASES["liter"]:
+        return "liter"
+    if token in UNIT_ALIASES["g"]:
+        return "g"
+    if token in UNIT_ALIASES["kg"]:
+        return "kg"
+    if token in UNIT_ALIASES["pakke"]:
+        return "pakke" if num == "1" else "pakker"
+    if token in UNIT_ALIASES["pose"]:
+        return "pose" if num == "1" else "poser"
+    if token in UNIT_ALIASES["d\u00e5se"]:
+        return "d\u00e5se" if num == "1" else "d\u00e5ser"
+    return token
+
+def deterministic_parse(text: str) -> List[Dict[str, object]]:
+    if not text or not text.strip():
+        return []
+
+    cleaned = text.lower()
+    cleaned = re.sub(r"(\d)([A-Za-z]+)", r"\1 \2", cleaned)
+    cleaned = re.sub(r"[\.,;!]+", ",", cleaned)
+    cleaned = re.sub(r"\+", " + ", cleaned)
+    cleaned = re.sub(r"[^\w\s,\-+]", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    parts = [part.strip() for part in cleaned.split(",") if part.strip()]
+    items: List[Dict[str, object]] = []
+    seen: set[str] = set()
+
+    conjunctions = {"og", "samt", "plus", "+"}
+    keep_pairs = {("salt", "peber")}
+
+    def split_on_conjunctions(tokens: List[str]) -> List[List[str]]:
+        segments: List[List[str]] = []
+        current: List[str] = []
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            if token in conjunctions and current:
+                j = i + 1
+                next_token = None
+                while j < len(tokens):
+                    candidate = tokens[j]
+                    if candidate in conjunctions or candidate in STOPWORDS:
+                        j += 1
+                        continue
+                    next_token = candidate
+                    break
+                if next_token:
+                    current_name_tokens = [
+                        t for t in current
+                        if t not in STOPWORDS
+                        and t not in conjunctions
+                        and not _parse_number(t)
+                        and not _is_unit(t)
+                    ]
+                    next_is_number = _parse_number(next_token) is not None
+                    next_is_unit = _is_unit(next_token)
+                    next_is_word = not next_is_number and not next_is_unit
+                    keep_pair = (
+                        len(current_name_tokens) == 1
+                        and next_is_word
+                        and (current_name_tokens[0], next_token) in keep_pairs
+                    )
+                    if current_name_tokens and (next_is_number or (next_is_word and not keep_pair)):
+                        segments.append(current)
+                        current = []
+                        i += 1
+                        continue
+            current.append(token)
+            i += 1
+        if current:
+            segments.append(current)
+        return segments
+
+    for part in parts:
+        part_tokens = [t for t in part.split() if t]
+        if not part_tokens:
+            continue
+        for tokens in split_on_conjunctions(part_tokens):
+            if not tokens:
+                continue
+
+            num = _parse_number(tokens[0])
+            idx = 1 if num else 0
+            unit = None
+            if num and idx < len(tokens) and _is_unit(tokens[idx]):
+                unit = _normalize_unit(tokens[idx], num)
+                idx += 1
+
+            name_tokens = tokens[idx:]
+            filtered = []
+            for token in name_tokens:
+                if token in STOPWORDS:
+                    continue
+                if _parse_number(token):
+                    continue
+                if _is_unit(token):
+                    continue
+                filtered.append(token)
+
+            if not filtered:
+                continue
+
+            if not num and not unit and "salt" in tokens and "og" in tokens and "peber" in tokens:
+                name = "salt og peber"
+            else:
+                name = " ".join(filtered).strip()
+                if not name or name in STOPWORDS:
+                    continue
+                if name in NUMBER_WORDS:
+                    continue
+
+            key = name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+
+            quantity = num or "1"
+            if num and unit:
+                quantity = f"{num} {unit}"
+
+            items.append(
+                {
+                    "name": name,
+                    "quantity": quantity,
+                    "warnings": [],
+                }
+            )
+
+    return items
+
+def normalize_unit(unit: str, num: Optional[str] = None) -> str:
+    unit_lower = unit.lower()
+    if unit_lower in ['l', 'liter']:
+        return 'liter'
+    if unit_lower in ['kg', 'kilo']:
+        return 'kg'
+    if unit_lower in ['g', 'gram']:
+        return 'g'
+    if unit_lower in ['ml', 'milliliter']:
+        return 'ml'
+    if unit_lower in ['dl', 'deciliter']:
+        return 'dl'
+    if unit_lower in ['cl', 'centiliter']:
+        return 'cl'
+    if unit_lower in ['stk', 'stykker', 'stykke']:
+        return 'stk'
+    if unit_lower in ['pk', 'pakke', 'pakker']:
+        return 'pakke' if num == '1' else 'pakker'
+    if unit_lower in ['pose', 'poser']:
+        return 'pose' if num == '1' else 'poser'
+    if unit_lower in ['fl', 'flaske', 'flasker']:
+        return 'flaske' if num == '1' else 'flasker'
+    if unit_lower in ['ds', 'd\u00e5se', 'd\u00e5ser']:
+        return 'd\u00e5se' if num == '1' else 'd\u00e5ser'
+    if unit_lower in ['bundt', 'net']:
+        return unit_lower
+    return unit
 
 def get_category(item_name: str) -> str:
     """Find kategori for en vare"""
@@ -121,17 +319,8 @@ def get_category(item_name: str) -> str:
     return 'andet'
 
 def get_default_quantity(item_name: str) -> str:
-    """Gæt standard mængde for en vare"""
-    item_lower = item_name.lower()
-    
-    # Tjek specifikke varer først
-    for key, qty in DEFAULT_QUANTITIES.items():
-        if key in item_lower:
-            return qty
-    
-    # Ellers brug kategori
-    category = get_category(item_name)
-    return DEFAULT_QUANTITIES.get(category, '1 stk')
+    """Gaet standard maengde for en vare"""
+    return "1"
 
 def smart_split_by_products(text: str) -> List[str]:
     """Splitter tekst ved kendte produkter for at adskille varer uden separator"""
@@ -224,23 +413,17 @@ def local_parse(text: str) -> List[Dict]:
         # Prøv specielle mønstre først
         
         # "tre/fire/fem kilo/liter X" (ordtal + enhed)
-        ordtal_match = re.match(r"^(en|et|to|tre|fire|fem|seks|syv|otte|ni|ti|halvanden|halvandet)\s+(liter|l|kilo|kg|gram|g)\s+(.+)$", part, re.IGNORECASE)
+        ordtal_match = re.match(r"^(en|et|to|tre|fire|fem|seks|syv|otte|ni|ti|halvanden|halvandet)\s+(liter|l|ml|dl|cl|stk|stykker|stykke|pakke|pakker|pk|poser|pose|g|gram|kg|kilo|fl|flaske|flasker|ds|d\u00e5se|d\u00e5ser|bundt|net)\s+(.+)$", part, re.IGNORECASE)
         if ordtal_match:
             num_word = ordtal_match.group(1).lower()
-            unit = ordtal_match.group(2).lower()
+            unit = ordtal_match.group(2)
             item_name = ordtal_match.group(3).strip()
             
             # Konverter ordtal til tal
             num = word_to_num.get(num_word, num_word)
             
             # Normaliser enhed
-            if unit in ['l', 'liter']:
-                unit = 'L'
-            elif unit in ['kg', 'kilo']:
-                unit = 'kg'
-            elif unit in ['g', 'gram']:
-                unit = 'g'
-            
+            unit = normalize_unit(unit, num)
             quantity = f"{num} {unit}"
         
         # "halvanden liter/kilo X"
@@ -249,7 +432,7 @@ def local_parse(text: str) -> List[Dict]:
             if halvanden_match:
                 unit = halvanden_match.group(2)
                 item_name = halvanden_match.group(3).strip()
-                unit_norm = "L" if unit.lower() in ['l', 'liter'] else "kg"
+                unit_norm = normalize_unit(unit, '1.5')
                 quantity = f"1.5 {unit_norm}"
         
         # "en/et/halv/halvt liter/kilo X"
@@ -267,9 +450,9 @@ def local_parse(text: str) -> List[Dict]:
                     num = '1'
                 
                 if unit_word in ['liter', 'l']:
-                    quantity = f"{num} L"
+                    quantity = f"{num} {normalize_unit(unit_word, num)}"
                 elif unit_word in ['kilo', 'kg']:
-                    quantity = f"{num} kg"
+                    quantity = f"{num} {normalize_unit(unit_word, num)}"
         
         # "X l/liter/kg/stk Y"
         elif re.match(r"^\d", part):
@@ -277,23 +460,7 @@ def local_parse(text: str) -> List[Dict]:
             if amount_match:
                 num = amount_match.group(1)
                 unit = amount_match.group(2) or "stk"
-                # Normaliser enhed
-                unit_lower = unit.lower()
-                if unit_lower in ['l', 'liter']:
-                    unit = 'L'
-                elif unit_lower in ['kg', 'kilo']:
-                    unit = 'kg'
-                elif unit_lower in ['g', 'gram']:
-                    unit = 'g'
-                elif unit_lower in ['ml', 'milliliter']:
-                    unit = 'ml'
-                elif unit_lower in ['dl', 'deciliter']:
-                    unit = 'dl'
-                elif unit_lower in ['stk', 'stykker', 'stykke']:
-                    unit = 'stk'
-                elif unit_lower in ['pk', 'pakke', 'pakker']:
-                    unit = 'pk'
-                    
+                unit = normalize_unit(unit, num)
                 quantity = f"{num} {unit}"
                 # Resten er item_name
                 item_name = part[amount_match.end():].strip()
@@ -432,32 +599,41 @@ RETURNÉR KUN JSON!"""
 
 def smart_parse(text: str, force_ai: bool = False) -> Dict:
     """
-    Smart parser - prøver lokal først, bruger AI ved usikkerhed
-    
-    Returns:
-        Dict med 'items' (liste), 'method' ('local' eller 'ai'), og 'confidence'
+    Smart parser - deterministisk lokalt, AI fallback ved behov.
     """
-    # Prøv lokal parsing først
-    local_result = local_parse(text)
-    
-    # Heuristik: Er vi sikre på resultatet?
-    all_unknown = all(item["category"] == "andet" for item in local_result) if local_result else True
-    short_input = len(text.split()) <= 2
+    local_items = deterministic_parse(text)
+    local_result = []
+    for item in local_items:
+        name = item.get("name", "")
+        if not name:
+            continue
+        quantity = item.get("quantity", "1")
+        warnings = item.get("warnings", [])
+        local_result.append(
+            {
+                "item": name,
+                "name": name,
+                "quantity": quantity,
+                "category": get_category(name),
+                "warnings": warnings,
+            }
+        )
+
     has_items = len(local_result) > 0
-    very_short = len(text.split()) < 4  # Meget korte input er ofte uklare
-    
+    all_unknown = all(item["category"] == "andet" for item in local_result) if has_items else True
+    short_input = len(text.split()) <= 2
+    very_short = len(text.split()) < 4
+
     confidence = "high"
     if all_unknown and has_items:
         confidence = "low"
     elif not has_items:
         confidence = "none"
-    
-    # Brug AI hvis vi er usikre eller force_ai er True
-    # Ved meget korte sætninger (<4 ord) eller ingen items - brug AI
+
     use_ai = force_ai or (confidence in ["low", "none"] and ANTHROPIC_AVAILABLE)
     if not has_items or all_unknown or very_short:
         use_ai = force_ai or ANTHROPIC_AVAILABLE
-    
+
     if use_ai and not short_input:
         ai_result = opus_parse(text)
         if ai_result:
@@ -465,17 +641,17 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
                 "items": ai_result,
                 "method": "ai",
                 "confidence": "high",
-                "original_text": text
+                "original_text": text,
+                "used_alternative": None,
             }
-    
-    # Returner lokal resultat
+
     return {
         "items": local_result,
         "method": "local",
         "confidence": confidence,
-        "original_text": text
+        "original_text": text,
+        "used_alternative": None,
     }
-
 # Test
 if __name__ == "__main__":
     test_phrases = [
@@ -510,3 +686,15 @@ if __name__ == "__main__":
                 print(f"   ✓ {item['item']}: {item['quantity']} ({item['category']})")
         else:
             print("   ✗ Ingen varer fundet")
+
+
+
+
+
+
+
+
+
+
+
+

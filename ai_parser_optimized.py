@@ -146,11 +146,7 @@ def _get_category(item: str) -> Category:
 @lru_cache(maxsize=256)
 def _get_default_qty(item: str) -> str:
     """Cached quantity lookup."""
-    lower = item.lower()
-    for key, qty in _DEFAULT_QTY.items():
-        if key in lower:
-            return qty
-    return _DEFAULT_QTY.get(_get_category(item), '1 stk')
+    return "1"
 
 def _clean_fillers(text: str) -> str:
     """Remove filler words efficiently from start AND middle of text."""
