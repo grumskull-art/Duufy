@@ -6,6 +6,8 @@ Bruger lokal regex først, falder tilbage til Claude API ved usikkerhed
 import re
 import os
 import json
+import string
+import unicodedata
 from typing import List, Dict, Optional
 from difflib import get_close_matches
 
@@ -138,6 +140,93 @@ UNIT_ALIASES = {
     "pose": {"pose", "poser"},
     "d\u00e5se": {"d\u00e5se", "d\u00e5ser", "ds"},
 }
+
+ALLOWED_MULTIWORD_ITEMS = {
+    "ice cream",
+    "sour cream",
+    "cottage cheese",
+    "peanut butter",
+    "bagepulver",
+    "bage soda",
+    "flormelis",
+    "rødvin",
+    "hvidvin",
+}
+
+def _normalize_item_text(value: str) -> str:
+    if not isinstance(value, str):
+        return ""
+    text = unicodedata.normalize("NFC", value).lower().strip()
+    text = text.strip(string.punctuation)
+    text = re.sub(r"\s+", " ", text).strip()
+    if len(text) <= 1:
+        return ""
+    text = re.sub(r"\b(\w+)(\s+\1\b)+", r"\1", text)
+    return text
+
+def canonicalize_items(raw_items: List[str]) -> List[str]:
+    normalized: List[str] = []
+    for raw in raw_items:
+        cleaned = _normalize_item_text(raw)
+        if cleaned:
+            normalized.append(cleaned)
+
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for item in normalized:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+
+    item_set = set(deduped)
+    survivors: List[str] = []
+    for item in deduped:
+        tokens = item.split()
+        if len(tokens) == 2 and item not in ALLOWED_MULTIWORD_ITEMS:
+            left = tokens[0]
+            right = tokens[1]
+            if left in item_set and right in item_set:
+                continue
+        survivors.append(item)
+
+    return survivors
+
+def _canonicalize_item_dicts(items: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    names: List[str] = []
+    for item in items:
+        name = item.get("name") or item.get("item")
+        if isinstance(name, str):
+            names.append(name)
+        else:
+            names.append("")
+
+    canonical_names = canonicalize_items(names)
+    if not canonical_names:
+        return []
+
+    lookup: Dict[str, Dict[str, object]] = {}
+    for item in items:
+        name = item.get("name") or item.get("item")
+        if not isinstance(name, str):
+            continue
+        normalized = _normalize_item_text(name)
+        if normalized and normalized not in lookup:
+            lookup[normalized] = item
+
+    result: List[Dict[str, object]] = []
+    for name in canonical_names:
+        item = lookup.get(name)
+        if not item:
+            continue
+        cleaned = dict(item)
+        if "name" in cleaned:
+            cleaned["name"] = name
+        if "item" in cleaned:
+            cleaned["item"] = name
+        result.append(cleaned)
+
+    return result
 
 def _parse_number(token: str) -> Optional[str]:
     if token in NUMBER_WORDS:
@@ -619,6 +708,8 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
             }
         )
 
+    local_result = _canonicalize_item_dicts(local_result)
+
     has_items = len(local_result) > 0
     all_unknown = all(item["category"] == "andet" for item in local_result) if has_items else True
     short_input = len(text.split()) <= 2
@@ -637,6 +728,7 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
     if use_ai and not short_input:
         ai_result = opus_parse(text)
         if ai_result:
+            ai_result = _canonicalize_item_dicts(ai_result)
             return {
                 "items": ai_result,
                 "method": "ai",
