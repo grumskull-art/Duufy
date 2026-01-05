@@ -225,6 +225,7 @@
             -webkit-touch-callout: none;
             -webkit-user-select: none;
             user-select: none;
+            touch-action: none;
         }
 
         .mic-btn:hover {
@@ -266,6 +267,7 @@
             user-select: none;
             -webkit-tap-highlight-color: transparent;
             transition: all 0.2s;
+            touch-action: none;
         }
         
         .floating-mic:active {
@@ -306,6 +308,12 @@
         .floating-mic.listening + .floating-mic-label {
             opacity: 1;
             transform: translateY(0);
+        }
+
+        @media (pointer: coarse) {
+            #micBtn {
+                display: none !important;
+            }
         }
 
         .button-group {
@@ -2290,32 +2298,28 @@
             ].filter(btn => btn !== null);
             
             micBtns.forEach(micBtn => {
-                // Touch events (mobil)
-                micBtn.addEventListener('touchstart', (e) => {
+                if (micBtn.dataset.micBound === '1') {
+                    return;
+                }
+                micBtn.dataset.micBound = '1';
+
+                micBtn.addEventListener('pointerdown', (e) => {
                     e.preventDefault();
-                    startSpeechRecognition();
-                }, { passive: false });
-                
-                micBtn.addEventListener('touchend', (e) => {
-                    e.preventDefault();
-                    stopSpeechRecognition();
-                }, { passive: false });
-                
-                micBtn.addEventListener('touchcancel', (e) => {
-                    stopSpeechRecognition();
-                });
-                
-                // Mouse events (PC)
-                micBtn.addEventListener('mousedown', (e) => {
-                    e.preventDefault();
+                    if (micBtn.setPointerCapture) {
+                        try { micBtn.setPointerCapture(e.pointerId); } catch (_) {}
+                    }
                     startSpeechRecognition();
                 });
-                
-                micBtn.addEventListener('mouseup', (e) => {
+
+                micBtn.addEventListener('pointerup', () => {
                     stopSpeechRecognition();
                 });
-                
-                micBtn.addEventListener('mouseleave', (e) => {
+
+                micBtn.addEventListener('pointercancel', () => {
+                    stopSpeechRecognition();
+                });
+
+                micBtn.addEventListener('pointerleave', () => {
                     if (isRecording) {
                         stopSpeechRecognition();
                     }
