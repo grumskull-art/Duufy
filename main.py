@@ -594,20 +594,15 @@ async def delete_item_by_id_route(item_id: str):
         raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
 
 
-ALLOWED_FIELDS = {"name", "quantity", "added_by"}
-
-
-class ItemPatch(BaseModel):
+class PatchItem(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     name: Optional[str] = None
     quantity: Optional[str] = None
-    added_by: Optional[str] = None
 
 
 @app.patch("/items/{item_id}")
-async def update_item_by_id_route(item_id: str, request: Request, payload: ItemPatch = Body(...)):
-    from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT
-    from errors import api_error, internal_error
+async def update_item_by_id_route(item_id: str, payload: PatchItem = Body(...)):
+    from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT, get_active_groups
 
     def _find_item(items, target_id):
         for item in items:
@@ -618,44 +613,35 @@ async def update_item_by_id_route(item_id: str, request: Request, payload: ItemP
     try:
         items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
         if not isinstance(items, list):
-            items = []
-        changed = False
-        for stored in items:
-            if isinstance(stored, dict) and not stored.get("id"):
-                stored["id"] = uuid4().hex
-                changed = True
-        if changed:
-            safe_write_json(_ITEMS_FILE_DEFAULT, items)
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
 
         item = _find_item(items, item_id)
         if not item:
-            return api_error("ITEM_NOT_FOUND", "Item not found", 404)
+            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
 
-        import json
-        body = await request.body()
-        raw = json.loads(body) if body else None
-        if isinstance(raw, dict) and not raw:
-            return api_error("EMPTY_PATCH", "Empty patch payload", 400)
+        active = get_active_groups()
+        if not isinstance(active, list):
+            raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
+        if item.get("group_id") not in active:
+            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
 
         updates = payload.model_dump(exclude_unset=True)
         if not updates:
-            return api_error("EMPTY_PATCH", "Empty patch payload", 400)
+            raise_http_error(400, "EMPTY_PATCH", "Empty patch payload")
 
         for key, value in updates.items():
-            if isinstance(value, str) and not value.strip():
-                return api_error("INVALID_INPUT", "Invalid payload", 400)
+            if isinstance(value, str):
+                if key == "name":
+                    value = value.strip()
             item[key] = value
 
         safe_write_json(_ITEMS_FILE_DEFAULT, items)
-        return UTF8JSONResponse(
-            status_code=200,
-            content={"message": "Item updated", "item": item},
-        )
+        return UTF8JSONResponse(status_code=200, content={"item": item})
     except (HTTPException, StarletteHTTPException, RequestValidationError):
         raise
     except Exception as e:
         print(f"Error updating item: {e}")
-        return internal_error("Internal Server Error")
+        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved opdatering")
 
 # TODO: Legacy group-scoped item endpoints (keep for old clients). /items is authoritative.
 @app.get("/group/{group_id}/items")
