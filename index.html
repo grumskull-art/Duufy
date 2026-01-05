@@ -1158,7 +1158,8 @@
                 return;
             }
             
-            const itemName = document.getElementById('itemName').value.trim();
+            const itemNameInput = document.getElementById('itemName');
+            const itemName = itemNameInput.value.trim();
             const itemQuantity = document.getElementById('itemQuantity').value.trim();
             
             if (!itemName) {
@@ -1166,6 +1167,20 @@
                 return;
             }
             
+            const text = itemNameInput.value.trim();
+            debugLog('DEBUG submit text:', text);
+            const added = await parseViaBackend(text, lastSpeechAlternatives, currentUser);
+            if (added) {
+                document.getElementById('itemForm').reset();
+                document.getElementById('itemQuantity').value = '1';
+                recordedTranscript = '';
+                interimTranscript = '';
+                lastSpeechText = '';
+                lastSpeechAlternatives = [];
+                document.getElementById('itemName').focus();
+                return;
+            }
+
             // Smart duplicate handling - læg mængder sammen automatisk
             const existingItems = document.querySelectorAll('.item');
             let existingQuantity = null;
@@ -2193,6 +2208,7 @@
 
         let isRecording = false;
         let recordedTranscript = '';
+        let interimTranscript = '';
         let lastSpeechText = '';
         let lastSpeechAlternatives = [];
         
@@ -2291,6 +2307,7 @@
             
             isRecording = true;
             recordedTranscript = '';
+            interimTranscript = '';
             lastSpeechText = '';
             lastSpeechAlternatives = [];
             
@@ -2309,7 +2326,7 @@
             if (navigator.vibrate) navigator.vibrate(50);
             
             recognition.onresult = (event) => {
-                let interimTranscript = '';
+                interimTranscript = '';
                 const lastResult = event.results[event.results.length - 1];
                 const alts = Array.from(lastResult)
                     .map((alt) => (alt.transcript || '').trim())
@@ -2416,13 +2433,6 @@
                     console.log('Stop error (ignored):', e);
                 }
             }
-            
-            // Parse og tilføj varer via backend AI
-            const spokenText = (lastSpeechText || itemNameInput.value).trim();
-            if (spokenText) {
-                debugLog('DEBUG raw transcript:', spokenText);
-                parseViaBackend(spokenText, lastSpeechAlternatives, currentUser);
-            }
         }
         
         // Brug backend AI til at parse stemme-input
@@ -2473,12 +2483,15 @@
                 
                 if (items.length > 0) {
                     await addMultipleItems(items);
+                    return true;
                 } else {
                     showMessage('Ingen varer fundet', 'error');
+                    return false;
                 }
             } catch (error) {
                 console.log('Backend parse error:', error);
                 showMessage('Kunne ikke parse input', 'error');
+                return false;
             }
         }
         
