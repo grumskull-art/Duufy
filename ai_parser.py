@@ -153,6 +153,17 @@ ALLOWED_MULTIWORD_ITEMS = {
     "hvidvin",
 }
 
+MAX_ITEM_TOKENS = 6
+STOP_PREFIXES_DA = [
+    "jeg skal", "vi skal", "jeg vil", "vi vil",
+    "skal have", "vil have",
+    "køb", "hent", "find", "tilføj", "skriv",
+    "jeg vil gerne", "vi vil gerne", "jeg skal have", "vi skal have",
+    "mangler", "vi mangler",
+]
+STOP_PREFIXES_EN = ["i need", "we need", "buy", "get", "add", "find", "please"]
+STOP_TOKENS = {"jeg", "vi", "skal", "vil", "køb", "hent", "find", "tilføj", "skriv", "hos", "fra", "please"}
+
 def _normalize_item_text(value: str) -> str:
     if not isinstance(value, str):
         return ""
@@ -163,6 +174,60 @@ def _normalize_item_text(value: str) -> str:
         return ""
     text = re.sub(r"\b(\w+)(\s+\1\b)+", r"\1", text)
     return text
+
+def strict_sanitize_items(items: List[str]) -> List[str]:
+    sanitized: List[str] = []
+    prefixes = STOP_PREFIXES_DA + STOP_PREFIXES_EN
+
+    for item in items:
+        cleaned = _normalize_item_text(item)
+        if not cleaned:
+            continue
+
+        for _ in range(3):
+            trimmed = False
+            for prefix in prefixes:
+                if cleaned == prefix:
+                    cleaned = ""
+                    trimmed = True
+                    break
+                if cleaned.startswith(prefix + " "):
+                    cleaned = cleaned[len(prefix):].strip()
+                    trimmed = True
+                    break
+            if trimmed:
+                cleaned = re.sub(r"\s+", " ", cleaned).strip()
+                if not cleaned:
+                    break
+                continue
+            break
+
+        if not cleaned:
+            continue
+
+        if re.fullmatch(r"\d+", cleaned):
+            continue
+
+        if cleaned.count(",") + cleaned.count(".") >= 2:
+            continue
+
+        tokens = cleaned.split()
+        if len(tokens) > MAX_ITEM_TOKENS:
+            continue
+        if any(token in STOP_TOKENS for token in tokens):
+            continue
+
+        sanitized.append(cleaned)
+
+    deduped: List[str] = []
+    seen: set[str] = set()
+    for item in sanitized:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+
+    return deduped
 
 def canonicalize_items(raw_items: List[str]) -> List[str]:
     normalized: List[str] = []
@@ -190,6 +255,7 @@ def canonicalize_items(raw_items: List[str]) -> List[str]:
                 continue
         survivors.append(item)
 
+    survivors = strict_sanitize_items(survivors)
     return survivors
 
 def _canonicalize_item_dicts(items: List[Dict[str, object]]) -> List[Dict[str, object]]:
