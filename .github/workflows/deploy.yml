@@ -13,6 +13,9 @@ jobs:
   test-and-deploy:
     name: Test & Deploy
     runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
 
     steps:
       - name: Checkout code
@@ -24,14 +27,14 @@ jobs:
           python-version: '3.11'
 
       - name: Skip Supabase test (missing secrets)
-        if: ${{ secrets.SUPABASE_URL == '' || secrets.SUPABASE_ANON_KEY == '' }}
+        if: ${{ env.SUPABASE_URL == '' || env.SUPABASE_ANON_KEY == '' }}
         run: echo "Skipping Supabase test (missing secrets)"
 
       - name: Test Supabase connection
-        if: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != '' }}
+        if: ${{ env.SUPABASE_URL != '' && env.SUPABASE_ANON_KEY != '' }}
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_URL: ${{ env.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ env.SUPABASE_ANON_KEY }}
         run: |
           pip install httpx -q
           python -c "
