@@ -23,7 +23,12 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Skip Supabase test (missing secrets)
+        if: ${{ secrets.SUPABASE_URL == '' || secrets.SUPABASE_ANON_KEY == '' }}
+        run: echo "Skipping Supabase test (missing secrets)"
+
       - name: Test Supabase connection
+        if: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != '' }}
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
