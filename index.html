@@ -1185,8 +1185,11 @@
             }
             
             const itemNameInput = document.getElementById('itemName');
-            const rawText = itemNameInput.value.trim();
-            const itemName = rawText;
+            const rawTyped = itemNameInput.value.trim();
+            const alts = Array.isArray(lastSpeechAlternatives) ? lastSpeechAlternatives : [];
+            const hasSpeech = typeof lastSpeechText === 'string' && lastSpeechText.trim().length > 0;
+            const primaryText = hasSpeech ? lastSpeechText.trim() : rawTyped;
+            const itemName = primaryText;
             const itemQuantity = document.getElementById('itemQuantity').value.trim();
             
             if (!itemName) {
@@ -1194,9 +1197,8 @@
                 return;
             }
             
-            const alts = Array.isArray(lastSpeechAlternatives) ? lastSpeechAlternatives : [];
-            if (shouldUseBackendParse(rawText, alts)) {
-                const cleanedText = normalizeNumbersDa(rawText);
+            if (shouldUseBackendParse(primaryText, alts)) {
+                const cleanedText = normalizeNumbersDa(primaryText);
                 debugLog('DEBUG submit text:', cleanedText);
                 const added = await parseViaBackend(cleanedText, alts, currentUser);
                 if (added) {
@@ -2490,7 +2492,7 @@
             const nonStop = tokens.filter(token => !STOP_WORDS.includes(token));
             if (!cleaned || nonStop.length === 0) {
                 showMessage("Sig fx: 'jeg skal bruge mælk og æg'", 'error');
-                return;
+                return false;
             }
 
             try {
