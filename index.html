@@ -1150,8 +1150,34 @@
             }
         });
 
+        function normalizeNumbersDa(text) {
+            if (!text) return text;
+            const map = {
+                en: '1',
+                et: '1',
+                to: '2',
+                tre: '3',
+                fire: '4',
+                fem: '5',
+                seks: '6',
+                syv: '7',
+                otte: '8',
+                ni: '9',
+                ti: '10'
+            };
+            return text.replace(/\b(en|et|to|tre|fire|fem|seks|syv|otte|ni|ti)\b/gi, (match) => map[match.toLowerCase()]);
+        }
+
+        function shouldUseBackendParse(rawText, alts) {
+            if (Array.isArray(alts) && alts.length > 0) return true;
+            if (!rawText) return false;
+            return /[,\/]|\bog\b|\bsamt\b|\bplus\b/i.test(rawText);
+        }
+
         document.getElementById('itemForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            showLoading(true);
+            try {
             
             if (!currentGroup) {
                 showMessage('❌ Vælg en gruppe først', 'error');
@@ -1159,7 +1185,8 @@
             }
             
             const itemNameInput = document.getElementById('itemName');
-            const itemName = itemNameInput.value.trim();
+            const rawText = itemNameInput.value.trim();
+            const itemName = rawText;
             const itemQuantity = document.getElementById('itemQuantity').value.trim();
             
             if (!itemName) {
@@ -1167,18 +1194,21 @@
                 return;
             }
             
-            const text = itemNameInput.value.trim();
-            debugLog('DEBUG submit text:', text);
-            const added = await parseViaBackend(text, lastSpeechAlternatives, currentUser);
-            if (added) {
-                document.getElementById('itemForm').reset();
-                document.getElementById('itemQuantity').value = '1';
-                recordedTranscript = '';
-                interimTranscript = '';
-                lastSpeechText = '';
-                lastSpeechAlternatives = [];
-                document.getElementById('itemName').focus();
-                return;
+            const alts = Array.isArray(lastSpeechAlternatives) ? lastSpeechAlternatives : [];
+            if (shouldUseBackendParse(rawText, alts)) {
+                const cleanedText = normalizeNumbersDa(rawText);
+                debugLog('DEBUG submit text:', cleanedText);
+                const added = await parseViaBackend(cleanedText, alts, currentUser);
+                if (added) {
+                    document.getElementById('itemForm').reset();
+                    document.getElementById('itemQuantity').value = '1';
+                    recordedTranscript = '';
+                    interimTranscript = '';
+                    lastSpeechText = '';
+                    lastSpeechAlternatives = [];
+                    document.getElementById('itemName').focus();
+                    return;
+                }
             }
 
             // Smart duplicate handling - læg mængder sammen automatisk
@@ -1250,8 +1280,6 @@
             };
 
             try {
-                showLoading(true);
-                
                 const response = await fetch(`${API_URL}/add_item`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -1272,9 +1300,10 @@
             } catch (error) {
                 console.error('Network error:', error);
                 showMessage('❌ Netværksfejl - tjek internet', 'error');
-            } finally {
-                showLoading(false);
             }
+        } finally {
+            showLoading(false);
+        }
         });
 
         async function loadGroups() {
@@ -1659,12 +1688,21 @@
                 }
                 
                 const data = await response.json();
+
+                if (!currentGroup && Array.isArray(data.groups) && data.groups.length > 0) {
+                    currentGroup = data.groups[0];
+                }
                 
                 const itemsList = document.getElementById('itemsList');
                 const itemCount = document.getElementById('itemCount');
+
+                const items = Array.isArray(data.items) ? data.items : [];
+                const filteredItems = currentGroup
+                    ? items.filter(item => item.group_id === currentGroup)
+                    : items;
                 
-                if (data.items && data.items.length > 0) {
-                    itemsList.innerHTML = `<div class="swipe-hint">← swipe for købt • hold højre 1 sek = slet →</div>` + data.items.map(item => `
+                if (filteredItems.length > 0) {
+                    itemsList.innerHTML = `<div class="swipe-hint">← swipe for købt • hold højre 1 sek = slet →</div>` + filteredItems.map(item => `
                         <div class="item" data-item-id="${item.id}" data-item-name="${item.name}" data-quantity="${item.quantity}">
                             <div class="swipe-bg swipe-bg-left">✓ Købt</div>
                             <div class="swipe-bg swipe-bg-right">🗑️ Slet</div>
@@ -1679,7 +1717,7 @@
                             </div>
                         </div>
                     `).join('');
-                    itemCount.textContent = data.items.length;
+                    itemCount.textContent = filteredItems.length;
                     
                     // Tilføj swipe handlers til alle items
                     initSwipeHandlers();
