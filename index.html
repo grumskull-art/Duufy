@@ -2259,6 +2259,7 @@
         let interimTranscript = '';
         let lastSpeechText = '';
         let lastSpeechAlternatives = [];
+        let hadSpeech = false;
         
         // Lydeffekter med Web Audio API
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -2312,22 +2313,25 @@
                 });
 
                 micBtn.addEventListener('pointerup', () => {
-                    stopSpeechRecognition();
+                    stopSpeechRecognition('pointerup');
                 });
 
                 micBtn.addEventListener('pointercancel', () => {
-                    stopSpeechRecognition();
+                    hadSpeech = false;
+                    stopSpeechRecognition('pointercancel');
                 });
 
                 micBtn.addEventListener('pointerleave', () => {
                     if (isRecording) {
-                        stopSpeechRecognition();
+                        hadSpeech = false;
+                        stopSpeechRecognition('pointerleave');
                     }
                 });
             });
         }
         
         function startSpeechRecognition() {
+            console.log('[mic] startSpeechRecognition() @', Date.now());
             if (!recognition) {
                 showMessage('❌ Tale ikke understøttet', 'error');
                 return;
@@ -2368,6 +2372,13 @@
             
             // Kun vibration ved start, ingen bip (forstyrrer optagelsen)
             if (navigator.vibrate) navigator.vibrate(50);
+
+            recognition.onstart = () => console.log('[mic] recognition.onstart @', Date.now());
+            recognition.onspeechstart = () => {
+                hadSpeech = true;
+                console.log('[mic] recognition.onspeechstart @', Date.now());
+            };
+            recognition.onspeechend = () => console.log('[mic] recognition.onspeechend @', Date.now());
             
             recognition.onresult = (event) => {
                 interimTranscript = '';
@@ -2424,14 +2435,15 @@
             };
 
             recognition.onend = () => {
+                console.log('[mic] recognition.onend @', Date.now(), 'isRecording:', isRecording);
                 // Nulstil recognitionActive flag - recognition er afsluttet
                 recognitionActive = false;
-                console.log('Recognition ended, isRecording:', isRecording);
             };
 
             // Start kun hvis ikke allerede aktiv
             if (!recognitionActive) {
                 try {
+                    hadSpeech = false;
                     recognition.start();
                     recognitionActive = true;
                 } catch(e) {
@@ -2448,7 +2460,8 @@
             }
         }
         
-        function stopSpeechRecognition() {
+        function stopSpeechRecognition(reason = 'unknown') {
+            console.log('[mic] stopSpeechRecognition(' + reason + ') @', Date.now());
             if (!isRecording) return;
             
             isRecording = false;
@@ -2471,10 +2484,15 @@
             // Stop recognition korrekt
             if (recognitionActive) {
                 try {
-                    recognition.stop();
+                    const hasTranscript = (recordedTranscript + interimTranscript).trim().length > 0;
+                    if (hadSpeech && hasTranscript) {
+                        recognition.stop();
+                    } else {
+                        recognition.abort();
+                    }
                     recognitionActive = false;
-                } catch(e) {
-                    console.log('Stop error (ignored):', e);
+                } catch (e) {
+                    console.log('Stop/abort error (ignored):', e);
                 }
             }
         }
