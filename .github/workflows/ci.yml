@@ -50,8 +50,14 @@ jobs:
           python -m py_compile supabase_client.py
 
       # 6. Test Supabase forbindelse (mock)
+      - name: Skip Supabase test (missing secrets)
+        if: ${{ secrets.SUPABASE_URL == '' || secrets.SUPABASE_ANON_KEY == '' }}
+        run: echo "Skipping Supabase test (missing secrets)"
       - name: Test Supabase connection
-        if: secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != ''
+        if: ${{ secrets.SUPABASE_URL != '' && secrets.SUPABASE_ANON_KEY != '' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           pip install httpx -q
           python - <<'PY'
