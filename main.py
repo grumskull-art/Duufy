@@ -318,6 +318,15 @@ async def parse_voice_input(request: ParseRequest):
                 result = alt_result
                 result["used_alternative"] = alt_text
                 break
+
+    unique_items = []
+    seen = set()
+    for item in result.get("items", []):
+        name = item["item"].strip().lower()
+        if name not in seen:
+            unique_items.append(item)
+            seen.add(name)
+    result["items"] = unique_items
     
     return result
 
