@@ -2,6 +2,7 @@
 Duufy Analytics & Event Tracking
 Track user behavior, bugs, and retention
 """
+import asyncio
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,13 @@ DATA_DIR = Path(__file__).parent / "data"
 EVENTS_FILE = DATA_DIR / "analytics_events.json"
 USERS_FILE = DATA_DIR / "analytics_users.json"
 ERRORS_FILE = DATA_DIR / "error_logs.json"
+_MAX_FILE_BYTES = 10 * 1024 * 1024
+_MAX_EVENTS = 5000
+_MAX_ERRORS = 1000
+
+_EVENTS_LOCK = asyncio.Lock()
+_ERRORS_LOCK = asyncio.Lock()
+_USERS_LOCK = asyncio.Lock()
 
 # Ensure data directory exists
 DATA_DIR.mkdir(exist_ok=True)
@@ -30,91 +38,146 @@ def _save_json(file_path: Path, data: dict):
     """Save dict to JSON file"""
     file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
+async def _load_json_async(file_path: Path) -> dict:
+    return await asyncio.to_thread(_load_json, file_path)
+
+
+async def _save_json_async(file_path: Path, data: dict) -> None:
+    await asyncio.to_thread(_save_json, file_path, data)
+
+
+async def _rotate_if_needed(file_path: Path, data: dict, keep_count: int) -> dict:
+    try:
+        stat = await asyncio.to_thread(file_path.stat)
+    except FileNotFoundError:
+        return data
+
+    if stat.st_size <= _MAX_FILE_BYTES:
+        return data
+
+    if not isinstance(data, dict) or keep_count <= 0:
+        return {}
+
+    items = list(data.items())
+    items.sort(key=lambda item: item[1].get("timestamp", ""))
+    return dict(items[-keep_count:])
+
+
+def _schedule_async(coro) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(coro)
+        return
+    loop.create_task(coro)
+
 def _get_user_hash(user_id: str) -> str:
     """Create anonymous hash of user ID for privacy"""
     return hashlib.sha256(user_id.encode()).hexdigest()[:16]
 
 # ============ USER TRACKING ============
 
-def track_user_signup(user_id: str, email: Optional[str] = None, metadata: Optional[Dict] = None):
+async def _track_user_signup_async(user_id: str, email: Optional[str] = None, metadata: Optional[Dict] = None) -> None:
     """Track new user signup"""
-    users = _load_json(USERS_FILE)
-    user_hash = _get_user_hash(user_id)
-    
-    users[user_hash] = {
-        "user_id_hash": user_hash,
-        "signup_date": datetime.now().isoformat(),
-        "last_active": datetime.now().isoformat(),
-        "email_domain": email.split('@')[1] if email else None,
-        "status": "active",
-        "metadata": metadata or {}
-    }
-    
-    _save_json(USERS_FILE, users)
-    track_event(user_id, "user_signup", metadata)
+    async with _USERS_LOCK:
+        users = await _load_json_async(USERS_FILE)
+        user_hash = _get_user_hash(user_id)
+
+        users[user_hash] = {
+            "user_id_hash": user_hash,
+            "signup_date": datetime.now().isoformat(),
+            "last_active": datetime.now().isoformat(),
+            "email_domain": email.split('@')[1] if email else None,
+            "status": "active",
+            "metadata": metadata or {},
+        }
+
+        await _save_json_async(USERS_FILE, users)
+
+    await track_event(user_id, "user_signup", metadata)
+
+
+def track_user_signup(user_id: str, email: Optional[str] = None, metadata: Optional[Dict] = None):
+    _schedule_async(_track_user_signup_async(user_id, email, metadata))
+
+
+async def _track_user_activity_async(user_id: str) -> None:
+    """Update last active timestamp"""
+    async with _USERS_LOCK:
+        users = await _load_json_async(USERS_FILE)
+        user_hash = _get_user_hash(user_id)
+
+        if user_hash in users:
+            users[user_hash]["last_active"] = datetime.now().isoformat()
+            await _save_json_async(USERS_FILE, users)
+
 
 def track_user_activity(user_id: str):
-    """Update last active timestamp"""
-    users = _load_json(USERS_FILE)
-    user_hash = _get_user_hash(user_id)
-    
-    if user_hash in users:
-        users[user_hash]["last_active"] = datetime.now().isoformat()
-        _save_json(USERS_FILE, users)
+    _schedule_async(_track_user_activity_async(user_id))
+
+
+async def _track_user_churn_async(user_id: str, reason: Optional[str] = None) -> None:
+    """Track when user uninstalls/churns"""
+    async with _USERS_LOCK:
+        users = await _load_json_async(USERS_FILE)
+        user_hash = _get_user_hash(user_id)
+
+        if user_hash in users:
+            users[user_hash]["status"] = "churned"
+            users[user_hash]["churn_date"] = datetime.now().isoformat()
+            users[user_hash]["churn_reason"] = reason
+            await _save_json_async(USERS_FILE, users)
+
+    await track_event(user_id, "user_churn", {"reason": reason})
+
 
 def track_user_churn(user_id: str, reason: Optional[str] = None):
-    """Track when user uninstalls/churns"""
-    users = _load_json(USERS_FILE)
-    user_hash = _get_user_hash(user_id)
-    
-    if user_hash in users:
-        users[user_hash]["status"] = "churned"
-        users[user_hash]["churn_date"] = datetime.now().isoformat()
-        users[user_hash]["churn_reason"] = reason
-        _save_json(USERS_FILE, users)
-        track_event(user_id, "user_churn", {"reason": reason})
+    _schedule_async(_track_user_churn_async(user_id, reason))
 
 # ============ EVENT TRACKING ============
 
-def track_event(user_id: str, event_name: str, data: Optional[Dict[str, Any]] = None):
+async def track_event(user_id: str, event_name: str, data: Optional[Dict[str, Any]] = None):
     """Track any user event"""
-    events = _load_json(EVENTS_FILE)
-    
-    event_id = f"{datetime.now().timestamp()}-{event_name}"
-    events[event_id] = {
-        "user_hash": _get_user_hash(user_id),
-        "event": event_name,
-        "timestamp": datetime.now().isoformat(),
-        "data": data or {}
-    }
-    
-    _save_json(EVENTS_FILE, events)
+    async with _EVENTS_LOCK:
+        events = await _load_json_async(EVENTS_FILE)
+        events = await _rotate_if_needed(EVENTS_FILE, events, _MAX_EVENTS)
+
+        event_id = f"{datetime.now().timestamp()}-{event_name}"
+        events[event_id] = {
+            "user_hash": _get_user_hash(user_id),
+            "event": event_name,
+            "timestamp": datetime.now().isoformat(),
+            "data": data or {},
+        }
+
+        await _save_json_async(EVENTS_FILE, events)
 
 # ============ ERROR LOGGING ============
 
-def log_error(error_type: str, message: str, user_id: Optional[str] = None, 
-              stack_trace: Optional[str] = None, metadata: Optional[Dict] = None):
+async def log_error(error_type: str, message: str, user_id: Optional[str] = None,
+                    stack_trace: Optional[str] = None, metadata: Optional[Dict] = None):
     """Log application errors"""
-    errors = _load_json(ERRORS_FILE)
-    
-    error_id = f"err-{datetime.now().timestamp()}"
-    errors[error_id] = {
-        "error_id": error_id,
-        "type": error_type,
-        "message": message,
-        "user_hash": _get_user_hash(user_id) if user_id else None,
-        "timestamp": datetime.now().isoformat(),
-        "stack_trace": stack_trace,
-        "metadata": metadata or {}
-    }
-    
-    _save_json(ERRORS_FILE, errors)
-    
-    # Also track as event if user is provided
+    async with _ERRORS_LOCK:
+        errors = await _load_json_async(ERRORS_FILE)
+        errors = await _rotate_if_needed(ERRORS_FILE, errors, _MAX_ERRORS)
+
+        error_id = f"err-{datetime.now().timestamp()}"
+        errors[error_id] = {
+            "error_id": error_id,
+            "type": error_type,
+            "message": message,
+            "user_hash": _get_user_hash(user_id) if user_id else None,
+            "timestamp": datetime.now().isoformat(),
+            "stack_trace": stack_trace,
+            "metadata": metadata or {},
+        }
+
+        await _save_json_async(ERRORS_FILE, errors)
+
     if user_id:
-        track_event(user_id, "error_occurred", {
+        await track_event(user_id, "error_occurred", {
             "error_type": error_type,
-            "error_message": message
+            "error_message": message,
         })
 
 # ============ ANALYTICS QUERIES ============

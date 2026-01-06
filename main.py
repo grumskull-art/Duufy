@@ -1,22 +1,28 @@
-from fastapi import FastAPI, Body, Request, HTTPException
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from models import Item
-from datetime import datetime
-from pathlib import Path
-from pydantic import BaseModel, ConfigDict
-from typing import Optional
-from uuid import uuid4
-from database import ensure_data_files
-import json
+import asyncio
+import os
 import time
 import traceback
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
-class UTF8JSONResponse(JSONResponse):
-    media_type = "application/json; charset=utf-8"
+from fastapi import FastAPI, Body, Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from pydantic import BaseModel
+from ai_parser import smart_parse
+from analytics import (
+    get_full_analytics,
+    log_error,
+    track_event,
+    track_user_activity as analytics_track_user_activity,
+    track_user_churn as analytics_track_user_churn,
+    track_user_signup as analytics_track_user_signup,
+)
+from api import auth, groups, items, invites
+from api.utils import UTF8JSONResponse
+from database import ensure_data_files
 
 
 app = FastAPI(
@@ -26,10 +32,15 @@ app = FastAPI(
     default_response_class=UTF8JSONResponse,
 )
 
+app.include_router(auth.router)
+app.include_router(groups.router)
+app.include_router(items.router)
+app.include_router(invites.router)
+
 
 @app.on_event("startup")
 async def startup_event():
-    ensure_data_files()
+    await ensure_data_files()
 
 
 @app.exception_handler(Exception)
@@ -85,24 +96,6 @@ async def request_validation_error_handler(request, exc: RequestValidationError)
         },
     )
 
-def raise_http_error(status_code: int, code: str, message: str) -> None:
-    raise HTTPException(
-        status_code=status_code,
-        detail={"error": {"code": code, "message": message}},
-    )
-
-def get_single_active_group_id() -> str:
-    from database import get_active_groups
-
-    active = get_active_groups()
-    if not isinstance(active, list):
-        raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
-    if not active:
-        raise_http_error(400, "NO_ACTIVE_GROUP", "No active group")
-    if len(active) > 1:
-        raise_http_error(400, "MULTIPLE_ACTIVE_GROUPS", "Multiple active groups")
-    return active[0]
-
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
 @app.middleware("http")
 async def block_drive_paths(request: Request, call_next):
@@ -117,8 +110,6 @@ async def block_drive_paths(request: Request, call_next):
 @app.middleware("http")
 async def track_errors_and_performance(request: Request, call_next):
     """Automatically log errors and slow requests"""
-    from analytics import log_error, track_event
-    
     start_time = time.time()
     
     try:
@@ -127,7 +118,7 @@ async def track_errors_and_performance(request: Request, call_next):
         # Track slow requests (>3 seconds)
         duration = time.time() - start_time
         if duration > 3.0:
-            log_error(
+            asyncio.create_task(log_error(
                 error_type="PerformanceWarning",
                 message=f"Slow request: {request.url.path} took {duration:.2f}s",
                 metadata={
@@ -135,7 +126,7 @@ async def track_errors_and_performance(request: Request, call_next):
                     "method": request.method,
                     "duration": duration
                 }
-            )
+            ))
         
         return response
         
@@ -145,7 +136,7 @@ async def track_errors_and_performance(request: Request, call_next):
         # Automatically log all unhandled exceptions
         duration = time.time() - start_time
         
-        log_error(
+        asyncio.create_task(log_error(
             error_type=type(e).__name__,
             message=str(e),
             stack_trace=traceback.format_exc(),
@@ -154,7 +145,7 @@ async def track_errors_and_performance(request: Request, call_next):
                 "method": request.method,
                 "duration": duration
             }
-        )
+        ))
         
         # Re-raise the exception so FastAPI handles it
         raise
@@ -162,114 +153,20 @@ async def track_errors_and_performance(request: Request, call_next):
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://duufy-api.fly.dev",
-        "http://localhost:5500",
-        "http://localhost:3000",
-    ],
+    allow_origins=[origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
 
-# ========== AUTHENTICATION ENDPOINTS ==========
-
-class SignUpRequest(BaseModel):
-    email: str
-    password: str
-    name: Optional[str] = None
-
-class SignInRequest(BaseModel):
-    email: str
-    password: str
-
-@app.post("/auth/signup")
-async def auth_signup(request: SignUpRequest):
-    """Create new user account"""
-    from supabase_client import sign_up
-    from analytics import track_user_signup
-    
-    result = sign_up(request.email, request.password, {"name": request.name})
-    
-    if result["success"]:
-        # Track signup in analytics
-        if result.get("user"):
-            track_user_signup(str(result["user"].id), request.email, {"name": request.name})
-        
-        return {
-            "success": True,
-            "message": "Konto oprettet! Tjek din email for at bekræfte.",
-            "user_id": str(result["user"].id) if result.get("user") else None
-        }
-    else:
-        return {"success": False, "error": result.get("error", "Signup fejlede")}
-
-@app.post("/auth/signin")
-async def auth_signin(request: SignInRequest):
-    """Sign in existing user"""
-    from supabase_client import sign_in
-    from analytics import track_event
-    
-    result = sign_in(request.email, request.password)
-    
-    if result["success"]:
-        track_event(str(result["user"].id), "user_signin")
-        
-        return {
-            "success": True,
-            "access_token": result["access_token"],
-            "user": {
-                "id": str(result["user"].id),
-                "email": result["user"].email
-            }
-        }
-    else:
-        return {"success": False, "error": result.get("error", "Login fejlede")}
-
-@app.post("/auth/signout")
-async def auth_signout(authorization: Optional[str] = None):
-    """Sign out user"""
-    from supabase_client import sign_out
-    
-    if authorization:
-        token = authorization.replace("Bearer ", "")
-        result = sign_out(token)
-        return result
-    return {"success": True}
-
-@app.get("/auth/me")
-async def auth_me(authorization: str = None):
-    """Get current user info"""
-    from supabase_client import get_user
-    
-    if not authorization:
-        return {"success": False, "error": "No token provided"}
-    
-    token = authorization.replace("Bearer ", "")
-    result = get_user(token)
-    
-    if result["success"]:
-        return {
-            "success": True,
-            "user": {
-                "id": str(result["user"].id),
-                "email": result["user"].email
-            }
-        }
-    return result
-
-@app.post("/auth/reset-password")
-async def auth_reset_password(email: str = Body(..., embed=True)):
-    """Send password reset email"""
-    from supabase_client import reset_password
-    return reset_password(email)
-
-
 @app.get("/")
 async def read_root():
     """Returner HTML-siden"""
-    return FileResponse(Path(__file__).parent / "index.html")
+    return FileResponse(
+        Path(__file__).parent / "index.html",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 @app.get("/app")
 async def get_app():
@@ -279,18 +176,24 @@ async def get_app():
 @app.get("/manifest.json")
 async def get_manifest():
     """PWA Manifest"""
-    return FileResponse(Path(__file__).parent / "manifest.json")
+    return FileResponse(
+        Path(__file__).parent / "manifest.json",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 @app.get("/sw.js")
 async def get_service_worker():
     """Service Worker"""
-    from fastapi.responses import Response
     content = (Path(__file__).parent / "sw.js").read_text()
     return Response(content=content, media_type="application/javascript")
 
 @app.get("/health")
 async def health_check():
     return {"status": "OK", "time": datetime.utcnow().isoformat()}
+
+@app.get("/version")
+async def get_version():
+    return {"version": "v1.1", "status": "ok"}
 
 # AI Parser endpoint
 class ParseRequest(BaseModel):
@@ -305,16 +208,21 @@ async def parse_voice_input(request: ParseRequest):
     Bruger lokal regex først, Claude AI ved usikkerhed.
     Prøver text_alternatives hvis hovedtekst fejler.
     """
-    from ai_parser import smart_parse
-    
     # Prøv hovedtekst først
     result = smart_parse(request.text, request.force_ai)
+    if asyncio.iscoroutine(result):
+        result = await result
     result = dict(result)
     
     # Hvis dårligt resultat og vi har alternativer, prøv dem
     if request.text_alternatives and (not result["items"] or result["confidence"] == "low"):
         all_texts = set([request.text] + (request.text_alternatives or []))
-        results = [smart_parse(t, request.force_ai) for t in all_texts]
+        results = []
+        for text in all_texts:
+            parsed = smart_parse(text, request.force_ai)
+            if asyncio.iscoroutine(parsed):
+                parsed = await parsed
+            results.append(parsed)
         merged = {
             i["item"].strip().lower(): i
             for r in results
@@ -333,461 +241,11 @@ async def parse_voice_input(request: ParseRequest):
     
     return result
 
-# GRUPPE endpoints
-@app.post("/group/{group_name}")
-async def create_group_route(group_name: str, owner_id: str):
-    from database import create_group
-    try:
-        if not owner_id or not owner_id.strip():
-            return {"message": "Fejl: Ugyldigt ejernavn", "status": "error"}
-        
-        if not group_name or not group_name.strip():
-            return {"message": "Fejl: Gruppenavn mangler", "status": "error"}
-        
-        if len(group_name.strip()) < 2:
-            return {"message": "Fejl: Gruppenavn skal vÃ¦re mindst 2 tegn", "status": "error"}
-        
-        group_id = create_group(group_name, owner_id)
-        return {"message": f"Gruppe '{group_name}' oprettet!", "group_id": group_id, "status": "success"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error creating group: {e}")
-        return {"message": "Serverfejl ved oprettelse", "status": "error"}
-
-@app.get("/groups")
-async def get_groups_route():
-    from database import get_groups, get_active_groups
-    try:
-        groups = get_groups()
-        active = get_active_groups()
-        return {"groups": groups, "active_groups": active}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting groups: {e}")
-        return {"groups": [], "active_groups": []}
-
-# MEDLEMMER endpoints
-@app.post("/group/{group_id}/member/{member_name}")
-async def add_member_route(group_id: str, member_name: str):
-    from database import add_member_to_group
-    try:
-        if not member_name or not member_name.strip():
-            return {"message": "Medlemsnavn mangler", "status": "error"}
-        
-        if len(member_name.strip()) < 2:
-            return {"message": "Navn skal vÃ¦re mindst 2 tegn", "status": "error"}
-        
-        success = add_member_to_group(group_id, member_name)
-        if success:
-            return {"message": f"{member_name} tilfÃ¸jet!", "status": "success"}
-        else:
-            return {"message": f"{member_name} er allerede medlem", "status": "info"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error adding member: {e}")
-        return {"message": "Serverfejl ved tilfÃ¸jelse", "status": "error"}
-
-@app.get("/group/{group_id}/members")
-async def get_members_route(group_id: str):
-    from database import get_group_members, get_group_owner
-    try:
-        members = get_group_members(group_id)
-        owner = get_group_owner(group_id)
-        return {"members": members, "count": len(members), "owner": owner}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting members: {e}")
-        return {"members": [], "count": 0, "owner": None}
-
-@app.delete("/group/{group_id}/member/{member_name}")
-async def remove_member_route(group_id: str, member_name: str, owner_check: str = "Grums"):
-    from database import remove_member_from_group, get_group_owner
-    try:
-        group_owner = get_group_owner(group_id)
-        # owner_check kommer fra frontend som den bruger der forsÃ¸ger at slette
-        if group_owner != owner_check:
-            return {"message": "Kun gruppeejer kan slette medlemmer", "status": "error"}
-        
-        success = remove_member_from_group(group_id, member_name)
-        if success:
-            return {"message": f"{member_name} fjernet!", "status": "success"}
-        else:
-            return {"message": "Fejl ved fjernelse", "status": "error"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error removing member: {e}")
-        return {"message": "Fejl ved fjernelse", "status": "error"}
-
-# AKTIVE GRUPPER endpoints
-@app.post("/active-groups")
-async def set_active_groups_route(group_ids: list = Body(...)):
-    from database import set_active_groups
-    try:
-        if len(group_ids) > 3:
-            return {"message": "Max 3 aktive grupper tilladt", "status": "error"}
-        
-        success = set_active_groups(group_ids)
-        if success:
-            return {"message": f"{len(group_ids)} gruppe(r) aktiveret!", "status": "success"}
-        else:
-            return {"message": "Fejl ved aktivering", "status": "error"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error setting active groups: {e}")
-        return {"message": "Fejl", "status": "error"}
-
-@app.get("/active-groups")
-async def get_active_groups_route():
-    from database import get_active_groups
-    try:
-        active = get_active_groups()
-        return {"active_groups": active}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting active groups: {e}")
-        return {"active_groups": []}
-
-@app.delete("/group/{group_id}")
-async def delete_group_route(group_id: str):
-    from database import delete_group, set_active_groups, get_active_groups
-    try:
-        success = delete_group(group_id)
-        if success:
-            # Fjern fra aktive grupper automatisk
-            active = get_active_groups()
-            set_active_groups(active)
-            return {"message": "Gruppe slettet!", "status": "success"}
-        else:
-            return {"message": "Gruppe ikke fundet", "status": "error"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error deleting group: {e}")
-        return {"message": "Fejl ved sletning", "status": "error"}
-
-# VARER endpoints
-@app.post("/add_item")
-async def add_item_route(item: Item):
-    from database import get_active_groups, load_items, save_items
-    try:
-       
-       
-        active = get_active_groups()
-        if not isinstance(active, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
-        if not active:
-            raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "No active group selected")
-        if len(active) != 1:
-            raise_http_error(409, "NO_ACTIVE_GROUP_SELECTED", "Select exactly one active group")
-
-
-        items = load_items()
-        if not isinstance(items, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
-        timestamp = datetime.utcnow().isoformat()
-        item_data = item.dict()
-        item_id = item_data.get("id") or uuid4().hex
-        group_id = active[0]
-        saved_item = {
-            "id": item_id,
-            "name": item_data.get("name"),
-            "quantity": item_data.get("quantity"),
-            "added_by": item_data.get("added_by"),
-            "timestamp": timestamp,
-            "group_id": group_id,
-        }
-        items.append(saved_item)
-        save_items(items)
-
-        # NOTE: Success response shape unchanged for clients.
-        return {"message": "Vare tilfÇŸ¶÷jet!", "item": saved_item}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error adding item: {e}")
-        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved tilfoejelse")
-
-@app.get("/items")
-async def get_items_flat_route():
-    from database import get_active_groups, load_items
-    try:
-        active = get_active_groups()
-        if not isinstance(active, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
-        if not active:
-            # NOTE: Success response shape unchanged for clients.
-            return {
-                "items": [],
-                "groups": [],
-                "last_updated": datetime.utcnow().isoformat(),
-            }
-
-        items = load_items()
-        if not isinstance(items, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
-        merged = [item for item in items if item.get("group_id") in active]
-
-        # NOTE: Success response shape unchanged for clients.
-        return {
-            "items": merged,
-            "groups": active,
-            "last_updated": datetime.utcnow().isoformat(),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting items: {e}")
-        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved hentning af varer")
-
-@app.delete("/items")
-async def clear_items_route():
-    from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT
-    try:
-        group_id = get_single_active_group_id()
-        items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
-        if not isinstance(items, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
-
-        remaining = [
-            item for item in items
-            if not isinstance(item, dict) or item.get("group_id") != group_id
-        ]
-        deleted_count = len(items) - len(remaining)
-        safe_write_json(_ITEMS_FILE_DEFAULT, remaining)
-        return {
-            "message": "Cleared items",
-            "group_id": group_id,
-            "deleted_count": deleted_count,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error clearing items: {e}")
-        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
-
-@app.delete("/items/{item_id}")
-async def delete_item_by_id_route(item_id: str):
-    from database import load_items, save_items
-
-    def _pop_item(items, target_id):
-        for index, item in enumerate(items):
-            if item.get("id") == target_id:
-                return items.pop(index)
-        return None
-
-    try:
-        if not item_id or not str(item_id).strip():
-            raise_http_error(400, "INVALID_INPUT", "Invalid item id")
-        items = load_items()
-        if not isinstance(items, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
-
-        deleted = _pop_item(items, item_id)
-        if not deleted:
-            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
-
-        save_items(items)
-        # NOTE: Success response shape unchanged for clients.
-        return UTF8JSONResponse(
-            status_code=200,
-            content={"message": "Item deleted", "item": deleted},
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error deleting item: {e}")
-        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved sletning")
-
-
-class PatchItem(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    name: Optional[str] = None
-    quantity: Optional[str] = None
-
-
-@app.patch("/items/{item_id}")
-async def update_item_by_id_route(item_id: str, payload: PatchItem = Body(...)):
-    from database import safe_read_json, safe_write_json, _ITEMS_FILE_DEFAULT, get_active_groups
-
-    def _find_item(items, target_id):
-        for item in items:
-            if item.get("id") == target_id:
-                return item
-        return None
-
-    try:
-        items = safe_read_json(_ITEMS_FILE_DEFAULT, [])
-        if not isinstance(items, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid items storage")
-
-        item = _find_item(items, item_id)
-        if not item:
-            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
-
-        active = get_active_groups()
-        if not isinstance(active, list):
-            raise_http_error(500, "INTERNAL_ERROR", "Invalid active groups state")
-        if item.get("group_id") not in active:
-            raise_http_error(404, "ITEM_NOT_FOUND", "Item not found")
-
-        updates = payload.model_dump(exclude_unset=True)
-        if not updates:
-            raise_http_error(400, "EMPTY_PATCH", "Empty patch payload")
-
-        for key, value in updates.items():
-            if isinstance(value, str):
-                if key == "name":
-                    value = value.strip()
-            item[key] = value
-
-        safe_write_json(_ITEMS_FILE_DEFAULT, items)
-        return UTF8JSONResponse(status_code=200, content={"item": item})
-    except (HTTPException, StarletteHTTPException, RequestValidationError):
-        raise
-    except Exception as e:
-        print(f"Error updating item: {e}")
-        raise_http_error(500, "INTERNAL_ERROR", "Serverfejl ved opdatering")
-
-# TODO: Legacy group-scoped item endpoints (keep for old clients). /items is authoritative.
-@app.get("/group/{group_id}/items")
-async def get_items_route(group_id: str):
-    from database import get_group_items
-    try:
-        items = get_group_items(group_id)
-        return {"items": items, "last_updated": datetime.utcnow().isoformat()}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting items: {e}")
-        return {"items": [], "last_updated": datetime.utcnow().isoformat()}
-
-@app.delete("/group/{group_id}/item/{item_name}")
-async def delete_item_route(group_id: str, item_name: str):
-    from database import delete_item_from_group
-    try:
-        success = delete_item_from_group(group_id, item_name)
-        if success:
-            return {"message": "Vare slettet!", "status": "success"}
-        else:
-            return {"message": "Vare ikke fundet", "status": "error"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error deleting item: {e}")
-        return {"message": "Serverfejl ved sletning", "status": "error"}
-
-@app.patch("/group/{group_id}/item/{item_name}/quantity")
-async def update_item_quantity_route(group_id: str, item_name: str, quantity: str = Body(..., embed=True)):
-    from database import update_item_quantity
-    try:
-        success = update_item_quantity(group_id, item_name, quantity)
-        if success:
-            return {"message": "MÃ¦ngde opdateret!", "status": "success"}
-        else:
-            return {"message": "Vare ikke fundet", "status": "error"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error updating quantity: {e}")
-        return {"message": "Serverfejl ved opdatering", "status": "error"}
-
-
-# ========== INVITATION ENDPOINTS ==========
-
-class InviteRequest(BaseModel):
-    email: str
-    group_id: str
-    group_name: str
-    inviter_name: str
-
-@app.post("/invite/send")
-async def send_invitation_route(request: InviteRequest):
-    """Sender en email-invitation til en bruger"""
-    from invitations import create_invitation
-    from fastapi import Request
-    try:
-        # Brug ngrok URL hvis tilgÃ¦ngelig, ellers localhost
-        base_url = "https://unsophomoric-nila-collaterally.ngrok-free.dev"
-        
-        result = create_invitation(
-            group_id=request.group_id,
-            group_name=request.group_name,
-            inviter_name=request.inviter_name,
-            email=request.email,
-            base_url=base_url
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error sending invitation: {e}")
-        return {"success": False, "message": "Fejl ved afsendelse af invitation"}
-
-@app.get("/invite/{token}")
-async def get_invitation_page(token: str):
-    """Viser invitation-siden"""
-    from invitations import get_invitation
-    from fastapi.responses import HTMLResponse
-    
-    invitation = get_invitation(token)
-    
-    
-    # Return invitation template with data
-    template_path = Path(__file__).parent / "templates" / "invitation.html"
-    with open(template_path, 'r', encoding='utf-8') as f:
-        html = f.read()
-    
-    # Simple template substitution
-    html = html.replace('{{ inviter_name }}', invitation['inviter_name'])
-    html = html.replace('{{ group_name }}', invitation['group_name'])
-    html = html.replace('{{ token }}', token)
-    
-    return HTMLResponse(content=html)
-
-class AcceptInviteRequest(BaseModel):
-    name: str
-
-@app.post("/invite/{token}/accept")
-async def accept_invitation_route(token: str, request: AcceptInviteRequest):
-    """Accepterer en invitation"""
-    from invitations import accept_invitation
-    try:
-        result = accept_invitation(token, request.name)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error accepting invitation: {e}")
-        return {"success": False, "message": "Fejl ved accept af invitation"}
-
-@app.get("/group/{group_id}/invitations")
-async def get_group_invitations_route(group_id: str):
-    """Henter ventende invitationer for en gruppe"""
-    from invitations import get_pending_invitations
-    try:
-        pending = get_pending_invitations(group_id)
-        return {"invitations": pending, "count": len(pending)}
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error getting invitations: {e}")
-        return {"invitations": [], "count": 0}
-
-
 # ========== SIGNUP / ONBOARDING ENDPOINT ==========
 
 @app.get("/signup")
 async def signup_page():
     """Generel signup/onboarding side for nye brugere"""
-    from fastapi.responses import HTMLResponse
-    
     html = """
     <!DOCTYPE html>
     <html lang="da">
@@ -979,10 +437,9 @@ async def track_analytics_event(
     data: Optional[dict] = Body(None)
 ):
     """Track user event for analytics"""
-    from analytics import track_event, track_user_activity
     try:
-        track_event(user_id, event, data)
-        track_user_activity(user_id)
+        asyncio.create_task(track_event(user_id, event, data))
+        analytics_track_user_activity(user_id)
         return {"success": True}
     except HTTPException:
         raise
@@ -996,9 +453,8 @@ async def track_signup(
     metadata: Optional[dict] = Body(None)
 ):
     """Track new user signup"""
-    from analytics import track_user_signup
     try:
-        track_user_signup(user_id, email, metadata)
+        analytics_track_user_signup(user_id, email, metadata)
         return {"success": True, "message": "Signup tracked"}
     except HTTPException:
         raise
@@ -1014,9 +470,8 @@ async def log_app_error(
     metadata: Optional[dict] = Body(None)
 ):
     """Log application error"""
-    from analytics import log_error
     try:
-        log_error(error_type, message, user_id, stack_trace, metadata)
+        asyncio.create_task(log_error(error_type, message, user_id, stack_trace, metadata))
         return {"success": True, "message": "Error logged"}
     except HTTPException:
         raise
@@ -1029,9 +484,8 @@ async def track_user_churn(
     reason: Optional[str] = Body(None)
 ):
     """Track user uninstall/churn"""
-    from analytics import track_user_churn
     try:
-        track_user_churn(user_id, reason)
+        analytics_track_user_churn(user_id, reason)
         return {"success": True, "message": "Churn tracked"}
     except HTTPException:
         raise
@@ -1041,9 +495,6 @@ async def track_user_churn(
 @app.get("/admin/analytics")
 async def get_analytics_dashboard():
     """Get complete analytics dashboard (ADMIN ONLY)"""
-    from analytics import get_full_analytics
-    from fastapi.responses import HTMLResponse
-    
     try:
         data = get_full_analytics()
         
@@ -1233,7 +684,6 @@ async def get_analytics_dashboard():
 @app.get("/admin/analytics/json")
 async def get_analytics_json():
     """Get analytics data as JSON (ADMIN ONLY)"""
-    from analytics import get_full_analytics
     return get_full_analytics()
 
 # ========== USER PROBLEM REPORTING ==========
@@ -1250,11 +700,10 @@ class ProblemReport(BaseModel):
 @app.post("/report-problem")
 async def report_problem(report: ProblemReport):
     """Let users report bugs and issues"""
-    from analytics import log_error, track_event
     
     try:
         # Log as error
-        log_error(
+        asyncio.create_task(log_error(
             error_type=f"UserReport_{report.problem_type}",
             message=f"{report.description}",
             user_id=report.user_id,
@@ -1265,13 +714,13 @@ async def report_problem(report: ProblemReport):
                 "actual": report.actual_behavior,
                 **(report.metadata or {})
             }
-        )
+        ))
         
         # Also track as event
-        track_event(report.user_id, "problem_reported", {
+        asyncio.create_task(track_event(report.user_id, "problem_reported", {
             "type": report.problem_type,
             "screen": report.screen
-        })
+        }))
         
         return {
             "success": True,
@@ -1294,12 +743,11 @@ async def validate_parse_result(
     was_correct: bool = Body(...)
 ):
     """Track if AI parsing was correct (user feedback)"""
-    from analytics import track_event, log_error
     
     try:
         if not was_correct:
             # Log as parsing error
-            log_error(
+            asyncio.create_task(log_error(
                 error_type="ParsingError",
                 message=f"User reported incorrect parsing: '{input_text}'",
                 user_id=user_id,
@@ -1308,16 +756,23 @@ async def validate_parse_result(
                     "output": parsed_items,
                     "user_feedback": "incorrect"
                 }
-            )
+            ))
         
-        track_event(user_id, "parse_feedback", {
+        asyncio.create_task(track_event(user_id, "parse_feedback", {
             "was_correct": was_correct,
             "input_length": len(input_text),
             "items_count": len(parsed_items)
-        })
+        }))
         
         return {"success": True, "message": "Feedback modtaget"}
     except HTTPException:
         raise
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+
+
+
+
+

@@ -9,6 +9,7 @@ so the rest of the codebase does not need to change.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -19,7 +20,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 from uuid import uuid4
 
-from db import safe_read_json, get_file_lock, _cleanup_tmp_files
+import aiofiles
+from db import get_file_lock, _cleanup_tmp_files
 
 logger = logging.getLogger(__name__)
 
@@ -32,67 +34,123 @@ _DATA_DIR_DEFAULT = Path("/data") if Path("/data").exists() else Path(__file__).
 _JSON_FILE_DEFAULT = _DATA_DIR_DEFAULT / "groups.json"
 _ITEMS_FILE_DEFAULT = _DATA_DIR_DEFAULT / "items.json"
 
+def _rotate_backups(filepath: Path) -> None:
+    backup_path = Path(str(filepath) + ".bak")
+    backup_1 = Path(str(filepath) + ".bak.1")
+    backup_2 = Path(str(filepath) + ".bak.2")
 
-def ensure_data_files() -> None:
+    if backup_2.exists():
+        backup_2.unlink()
+    if backup_1.exists():
+        os.replace(backup_1, backup_2)
+    if backup_path.exists():
+        os.replace(backup_path, backup_1)
+
+
+async def ensure_data_files() -> None:
     data_dir = _JSON_FILE_DEFAULT.parent
     data_dir.mkdir(parents=True, exist_ok=True)
 
     for file_path in (_JSON_FILE_DEFAULT, _ITEMS_FILE_DEFAULT):
         if not file_path.exists():
-            safe_write_json(file_path, [])
-            continue
-
-        content = file_path.read_text(encoding="utf-8")
-        if not content.strip():
-            safe_write_json(file_path, [])
+            await safe_write_json(file_path, [])
             continue
 
         try:
-            json.loads(content)
+            async with aiofiles.open(file_path, "r", encoding="utf-8") as f:
+                content = await f.read()
+        except OSError:
+            await safe_write_json(file_path, [])
+            continue
+
+        if not content.strip():
+            await safe_write_json(file_path, [])
+            continue
+
+        try:
+            await asyncio.to_thread(json.loads, content)
         except json.JSONDecodeError:
-            safe_write_json(file_path, [])
+            await safe_write_json(file_path, [])
 
 
-def safe_write_json(filepath: Path, data: Any) -> None:
+async def safe_read_json(filepath: Path, default: Any = None) -> Any:
+    """Thread-safe JSON file reading with file locking"""
+    if not filepath.exists():
+        return default if default is not None else {}
+
+    lock = await asyncio.to_thread(get_file_lock, filepath)
+    await asyncio.to_thread(lock.acquire)
+    try:
+        await asyncio.to_thread(_cleanup_tmp_files, filepath)
+        try:
+            async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
+                content = await f.read()
+            if not content:
+                return default if default is not None else {}
+            return await asyncio.to_thread(json.loads, content)
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("Failed to read JSON file %s: %s", filepath, exc)
+            backup_path = Path(str(filepath) + ".bak")
+            if backup_path.exists():
+                try:
+                    async with aiofiles.open(backup_path, "r", encoding="utf-8") as f:
+                        content = await f.read()
+                    if not content:
+                        return default if default is not None else {}
+                    return await asyncio.to_thread(json.loads, content)
+                except (json.JSONDecodeError, OSError) as backup_exc:
+                    logger.warning("Failed to read JSON backup %s: %s", backup_path, backup_exc)
+            return default if default is not None else {}
+    finally:
+        await asyncio.to_thread(lock.release)
+
+
+async def safe_write_json(filepath: Path, data: Any) -> None:
     """Thread-safe JSON file writing with file locking"""
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
-    lock = get_file_lock(filepath)
-    with lock:
-        _cleanup_tmp_files(filepath)
+    lock = await asyncio.to_thread(get_file_lock, filepath)
+    await asyncio.to_thread(lock.acquire)
+    try:
+        await asyncio.to_thread(_cleanup_tmp_files, filepath)
         if filepath.exists():
+            await asyncio.to_thread(_rotate_backups, filepath)
             backup_path = Path(str(filepath) + ".bak")
             backup_temp = Path(str(filepath) + f".bak.tmp.{os.getpid()}")
             try:
-                shutil.copyfile(filepath, backup_temp)
-                os.replace(backup_temp, backup_path)
+                await asyncio.to_thread(shutil.copyfile, filepath, backup_temp)
+                await asyncio.to_thread(os.replace, backup_temp, backup_path)
             except OSError as exc:
                 logger.warning("Failed to update JSON backup %s: %s", backup_path, exc)
                 try:
                     if backup_temp.exists():
-                        backup_temp.unlink()
+                        await asyncio.to_thread(backup_temp.unlink)
                 except OSError:
                     pass
 
         temp_file = filepath.with_name(f"{filepath.name}.tmp.{os.getpid()}")
         try:
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(temp_file, filepath)
+            payload = await asyncio.to_thread(json.dumps, data, indent=2, ensure_ascii=False)
+            async with aiofiles.open(temp_file, "w", encoding="utf-8") as f:
+                await f.write(payload)
+                await f.flush()
+                fileno = await f.fileno()
+                await asyncio.to_thread(os.fsync, fileno)
+            await asyncio.to_thread(os.replace, temp_file, filepath)
         except OSError as exc:
             logger.error("Failed to write JSON file %s: %s", filepath, exc)
             try:
                 if temp_file.exists():
-                    temp_file.unlink()
+                    await asyncio.to_thread(temp_file.unlink)
             except OSError:
                 pass
             raise
+    finally:
+        await asyncio.to_thread(lock.release)
 
 
-def load_items() -> List[Dict[str, Any]]:
-    data = safe_read_json(_ITEMS_FILE_DEFAULT, [])
+async def load_items() -> List[Dict[str, Any]]:
+    data = await safe_read_json(_ITEMS_FILE_DEFAULT, [])
     if not isinstance(data, list):
         return []
 
@@ -103,12 +161,12 @@ def load_items() -> List[Dict[str, Any]]:
             changed = True
 
     if changed:
-        safe_write_json(_ITEMS_FILE_DEFAULT, data)
+        await safe_write_json(_ITEMS_FILE_DEFAULT, data)
     return data
 
 
-def save_items(items: List[Dict[str, Any]]) -> None:
-    safe_write_json(_ITEMS_FILE_DEFAULT, items)
+async def save_items(items: List[Dict[str, Any]]) -> None:
+    await safe_write_json(_ITEMS_FILE_DEFAULT, items)
 
 
 def _get_backend() -> str:
@@ -142,43 +200,43 @@ def _now_iso() -> str:
 
 
 class GroupStore(Protocol):
-    def create_group(self, group_name: str, owner_id: str) -> str:
+    async def create_group(self, group_name: str, owner_id: str) -> str:
         ...
 
-    def get_groups(self) -> List[Dict[str, Any]]:
+    async def get_groups(self) -> List[Dict[str, Any]]:
         ...
 
-    def add_member_to_group(self, group_id: str, member_name: str) -> bool:
+    async def add_member_to_group(self, group_id: str, member_name: str) -> bool:
         ...
 
-    def get_group_members(self, group_id: str) -> List[str]:
+    async def get_group_members(self, group_id: str) -> List[str]:
         ...
 
-    def get_group_owner(self, group_id: str) -> Optional[str]:
+    async def get_group_owner(self, group_id: str) -> Optional[str]:
         ...
 
-    def set_active_groups(self, group_ids: List[str]) -> bool:
+    async def set_active_groups(self, group_ids: List[str]) -> bool:
         ...
 
-    def get_active_groups(self) -> List[str]:
+    async def get_active_groups(self) -> List[str]:
         ...
 
-    def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
+    async def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
         ...
 
-    def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
+    async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
         ...
 
-    def delete_item_from_group(self, group_id: str, item_name: str) -> None:
+    async def delete_item_from_group(self, group_id: str, item_name: str) -> None:
         ...
 
-    def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
+    async def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
         ...
 
-    def delete_group(self, group_id: str) -> bool:
+    async def delete_group(self, group_id: str) -> bool:
         ...
 
-    def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
+    async def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
         ...
 
 
@@ -191,14 +249,14 @@ class GroupStore(Protocol):
 class JsonGroupStore:
     json_file: Path = _JSON_FILE_DEFAULT
 
-    def _load(self) -> Dict[str, Any]:
-        data = safe_read_json(self.json_file, {"groups": {}, "active_groups": []})
+    async def _load(self) -> Dict[str, Any]:
+        data = await safe_read_json(self.json_file, {"groups": {}, "active_groups": []})
         if not isinstance(data, dict):
             return {"groups": {}, "active_groups": []}
         return data
 
-    def _save(self, data: Dict[str, Any]) -> None:
-        safe_write_json(self.json_file, data)
+    async def _save(self, data: Dict[str, Any]) -> None:
+        await safe_write_json(self.json_file, data)
 
     @staticmethod
     def _make_group_id(group_name: str) -> str:
@@ -210,8 +268,8 @@ class JsonGroupStore:
             .replace("-", "_")
         )
 
-    def create_group(self, group_name: str, owner_id: str) -> str:
-        data = self._load()
+    async def create_group(self, group_name: str, owner_id: str) -> str:
+        data = await self._load()
         group_id = self._make_group_id(group_name)
 
         if group_id in data["groups"]:
@@ -226,12 +284,12 @@ class JsonGroupStore:
             "created": ts,
             "last_updated": ts,
         }
-        self._save(data)
+        await self._save(data)
         return group_id
 
-    def get_groups(self) -> List[Dict[str, Any]]:
-        data = self._load()
-        items_data = safe_read_json(_ITEMS_FILE_DEFAULT, [])
+    async def get_groups(self) -> List[Dict[str, Any]]:
+        data = await self._load()
+        items_data = await safe_read_json(_ITEMS_FILE_DEFAULT, [])
         items = items_data if isinstance(items_data, list) else []
         item_counts: Dict[str, int] = {}
         for item in items:
@@ -254,8 +312,8 @@ class JsonGroupStore:
             )
         return groups
 
-    def add_member_to_group(self, group_id: str, member_name: str) -> bool:
-        data = self._load()
+    async def add_member_to_group(self, group_id: str, member_name: str) -> bool:
+        data = await self._load()
         if group_id not in data.get("groups", {}):
             return False
 
@@ -267,37 +325,37 @@ class JsonGroupStore:
         members.append(member_name)
         data["groups"][group_id]["members"] = members
         data["groups"][group_id]["last_updated"] = _now_iso()
-        self._save(data)
+        await self._save(data)
         return True
 
-    def get_group_members(self, group_id: str) -> List[str]:
-        data = self._load()
+    async def get_group_members(self, group_id: str) -> List[str]:
+        data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
             return []
         return list(group.get("members", []) or [])
 
-    def get_group_owner(self, group_id: str) -> Optional[str]:
-        data = self._load()
+    async def get_group_owner(self, group_id: str) -> Optional[str]:
+        data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
             return None
         return group.get("owner_id")
 
-    def set_active_groups(self, group_ids: List[str]) -> bool:
+    async def set_active_groups(self, group_ids: List[str]) -> bool:
         if len(group_ids) > 3:
             return False
-        data = self._load()
+        data = await self._load()
         data["active_groups"] = list(group_ids)
-        self._save(data)
+        await self._save(data)
         return True
 
-    def get_active_groups(self) -> List[str]:
-        data = self._load()
+    async def get_active_groups(self) -> List[str]:
+        data = await self._load()
         return list(data.get("active_groups", []) or [])
 
-    def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
-        data = self._load()
+    async def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
+        data = await self._load()
         targets = group_ids or data.get("active_groups", []) or []
         if not targets:
             return False
@@ -310,18 +368,18 @@ class JsonGroupStore:
                 data["groups"][gid].setdefault("items", []).append(item)
                 data["groups"][gid]["last_updated"] = _now_iso()
 
-        self._save(data)
+        await self._save(data)
         return True
 
-    def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
-        data = self._load()
+    async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
+        data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
             return []
         return list(group.get("items", []) or [])
 
-    def delete_item_from_group(self, group_id: str, item_name: str) -> None:
-        data = self._load()
+    async def delete_item_from_group(self, group_id: str, item_name: str) -> None:
+        data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
             return
@@ -334,10 +392,10 @@ class JsonGroupStore:
 
         group["items"] = items
         group["last_updated"] = _now_iso()
-        self._save(data)
+        await self._save(data)
 
-    def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
-        data = self._load()
+    async def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
+        data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
             return False
@@ -346,11 +404,11 @@ class JsonGroupStore:
         new_members = [m for m in members if m.lower() != member_name.lower()]
         group["members"] = new_members
         group["last_updated"] = _now_iso()
-        self._save(data)
+        await self._save(data)
         return True
 
-    def delete_group(self, group_id: str) -> bool:
-        data = self._load()
+    async def delete_group(self, group_id: str) -> bool:
+        data = await self._load()
         if group_id not in data.get("groups", {}):
             return False
 
@@ -358,11 +416,11 @@ class JsonGroupStore:
         if group_id in (data.get("active_groups", []) or []):
             data["active_groups"] = [g for g in data["active_groups"] if g != group_id]
 
-        self._save(data)
+        await self._save(data)
         return True
 
-    def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
-        data = self._load()
+    async def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
+        data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
             return False
@@ -373,7 +431,7 @@ class JsonGroupStore:
                 item["quantity"] = new_quantity
                 group["items"] = items
                 group["last_updated"] = _now_iso()
-                self._save(data)
+                await self._save(data)
                 return True
         return False
 
@@ -416,43 +474,43 @@ class FirestoreGroupStore:
             "Use DUUFY_STORAGE=json until Firestore implementation is completed."
         )
 
-    def create_group(self, group_name: str, owner_id: str) -> str:
+    async def create_group(self, group_name: str, owner_id: str) -> str:
         self._not_ready()
 
-    def get_groups(self) -> List[Dict[str, Any]]:
+    async def get_groups(self) -> List[Dict[str, Any]]:
         self._not_ready()
 
-    def add_member_to_group(self, group_id: str, member_name: str) -> bool:
+    async def add_member_to_group(self, group_id: str, member_name: str) -> bool:
         self._not_ready()
 
-    def get_group_members(self, group_id: str) -> List[str]:
+    async def get_group_members(self, group_id: str) -> List[str]:
         self._not_ready()
 
-    def get_group_owner(self, group_id: str) -> Optional[str]:
+    async def get_group_owner(self, group_id: str) -> Optional[str]:
         self._not_ready()
 
-    def set_active_groups(self, group_ids: List[str]) -> bool:
+    async def set_active_groups(self, group_ids: List[str]) -> bool:
         self._not_ready()
 
-    def get_active_groups(self) -> List[str]:
+    async def get_active_groups(self) -> List[str]:
         self._not_ready()
 
-    def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
+    async def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
         self._not_ready()
 
-    def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
+    async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
         self._not_ready()
 
-    def delete_item_from_group(self, group_id: str, item_name: str) -> None:
+    async def delete_item_from_group(self, group_id: str, item_name: str) -> None:
         self._not_ready()
 
-    def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
+    async def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
         self._not_ready()
 
-    def delete_group(self, group_id: str) -> bool:
+    async def delete_group(self, group_id: str) -> bool:
         self._not_ready()
 
-    def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
+    async def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
         self._not_ready()
 
 
@@ -482,53 +540,53 @@ def _store() -> GroupStore:
 # ----------------------------
 
 
-def create_group(group_name: str, owner_id: str = "Grums") -> str:
-    return _store().create_group(group_name, owner_id)
+async def create_group(group_name: str, owner_id: str = "Grums") -> str:
+    return await _store().create_group(group_name, owner_id)
 
 
-def get_groups() -> List[Dict[str, Any]]:
-    return _store().get_groups()
+async def get_groups() -> List[Dict[str, Any]]:
+    return await _store().get_groups()
 
 
-def add_member_to_group(group_id: str, member_name: str) -> bool:
-    return _store().add_member_to_group(group_id, member_name)
+async def add_member_to_group(group_id: str, member_name: str) -> bool:
+    return await _store().add_member_to_group(group_id, member_name)
 
 
-def get_group_members(group_id: str) -> List[str]:
-    return _store().get_group_members(group_id)
+async def get_group_members(group_id: str) -> List[str]:
+    return await _store().get_group_members(group_id)
 
 
-def get_group_owner(group_id: str) -> Optional[str]:
-    return _store().get_group_owner(group_id)
+async def get_group_owner(group_id: str) -> Optional[str]:
+    return await _store().get_group_owner(group_id)
 
 
-def set_active_groups(group_ids: List[str]) -> bool:
-    return _store().set_active_groups(group_ids)
+async def set_active_groups(group_ids: List[str]) -> bool:
+    return await _store().set_active_groups(group_ids)
 
 
-def get_active_groups() -> List[str]:
-    return _store().get_active_groups()
+async def get_active_groups() -> List[str]:
+    return await _store().get_active_groups()
 
 
-def add_item_to_groups(item_data: Dict[str, Any], group_ids: Optional[List[str]] = None) -> bool:
-    return _store().add_item_to_groups(item_data, group_ids)
+async def add_item_to_groups(item_data: Dict[str, Any], group_ids: Optional[List[str]] = None) -> bool:
+    return await _store().add_item_to_groups(item_data, group_ids)
 
 
-def get_group_items(group_id: str) -> List[Dict[str, Any]]:
-    return _store().get_group_items(group_id)
+async def get_group_items(group_id: str) -> List[Dict[str, Any]]:
+    return await _store().get_group_items(group_id)
 
 
-def delete_item_from_group(group_id: str, item_name: str) -> None:
-    return _store().delete_item_from_group(group_id, item_name)
+async def delete_item_from_group(group_id: str, item_name: str) -> None:
+    return await _store().delete_item_from_group(group_id, item_name)
 
 
-def remove_member_from_group(group_id: str, member_name: str) -> bool:
-    return _store().remove_member_from_group(group_id, member_name)
+async def remove_member_from_group(group_id: str, member_name: str) -> bool:
+    return await _store().remove_member_from_group(group_id, member_name)
 
 
-def delete_group(group_id: str) -> bool:
-    return _store().delete_group(group_id)
+async def delete_group(group_id: str) -> bool:
+    return await _store().delete_group(group_id)
 
 
-def update_item_quantity(group_id: str, item_name: str, new_quantity: str) -> bool:
-    return _store().update_item_quantity(group_id, item_name, new_quantity)
+async def update_item_quantity(group_id: str, item_name: str, new_quantity: str) -> bool:
+    return await _store().update_item_quantity(group_id, item_name, new_quantity)
