@@ -309,15 +309,18 @@ async def parse_voice_input(request: ParseRequest):
     
     # Prøv hovedtekst først
     result = smart_parse(request.text, request.force_ai)
+    result = dict(result)
     
     # Hvis dårligt resultat og vi har alternativer, prøv dem
     if request.text_alternatives and (not result["items"] or result["confidence"] == "low"):
-        for alt_text in request.text_alternatives[1:]:  # Skip første (det er hovedtekst)
-            alt_result = smart_parse(alt_text, request.force_ai)
-            if alt_result["items"] and alt_result["confidence"] == "high":
-                result = alt_result
-                result["used_alternative"] = alt_text
-                break
+        all_texts = set([request.text] + (request.text_alternatives or []))
+        results = [smart_parse(t, request.force_ai) for t in all_texts]
+        merged = {
+            i["item"].strip().lower(): i
+            for r in results
+            for i in r.get("items", [])
+        }
+        result["items"] = list(merged.values())
 
     unique_items = []
     seen = set()

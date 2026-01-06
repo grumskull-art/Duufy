@@ -4,6 +4,22 @@ from typing import Callable
 
 from ai_config import load_ai_config
 
+try:
+    from anthropic import Anthropic
+except ImportError:
+    Anthropic = None
+
+_client = None
+
+
+def get_client():
+    global _client
+    if Anthropic is None:
+        raise RuntimeError("ANTHROPIC_NOT_AVAILABLE")
+    if _client is None:
+        _client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    return _client
+
 
 def is_ai_enabled() -> bool:
     value = os.getenv("DUUFY_AI_ENABLED", "")

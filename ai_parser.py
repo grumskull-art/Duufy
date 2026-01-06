@@ -8,8 +8,10 @@ import os
 import json
 import string
 import unicodedata
+from functools import lru_cache
 from typing import List, Dict, Optional
 from difflib import get_close_matches
+from ai_provider import get_client
 
 # Load .env fil
 try:
@@ -666,7 +668,7 @@ def opus_parse(text: str) -> List[Dict]:
         return []
     
     try:
-        client = Anthropic(api_key=api_key)
+        client = get_client()
         
         prompt = f"""Du er en intelligent dansk indkøbsassistent. Brugeren taler ofte UTYDELIGT med dårligt/mumlet dansk.
 Dit job: Forstå hvad de MENER og udtræk kun de relevante produkter.
@@ -752,6 +754,7 @@ RETURNÉR KUN JSON!"""
         print(f"⚠️ Claude API fejl: {e}")
         return []
 
+@lru_cache(maxsize=256)
 def smart_parse(text: str, force_ai: bool = False) -> Dict:
     """
     Smart parser - deterministisk lokalt, AI fallback ved behov.
@@ -795,6 +798,14 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
         ai_result = opus_parse(text)
         if ai_result:
             ai_result = _canonicalize_item_dicts(ai_result)
+            unique_items = []
+            seen = set()
+            for item in ai_result:
+                name = item["item"].strip().lower()
+                if name not in seen:
+                    unique_items.append(item)
+                    seen.add(name)
+            ai_result = unique_items
             return {
                 "items": ai_result,
                 "method": "ai",
@@ -802,6 +813,15 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
                 "original_text": text,
                 "used_alternative": None,
             }
+
+    unique_items = []
+    seen = set()
+    for item in local_result:
+        name = item["item"].strip().lower()
+        if name not in seen:
+            unique_items.append(item)
+            seen.add(name)
+    local_result = unique_items
 
     return {
         "items": local_result,
