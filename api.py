@@ -4,7 +4,7 @@ import logging
 
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
-from fastapi import Body, Depends, FastAPI
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from auth import verify_token
@@ -42,6 +42,18 @@ async def on_startup() -> None:
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
     logger.info("Duufy API lukket")
+
+
+@app.exception_handler(Exception)
+async def handle_exceptions(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("Fejl: %s", exc)
+    return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info("Anmodning modtaget: %s %s", request.method, request.url.path)
+    return await call_next(request)
 
 
 @app.get("/ping")
@@ -164,7 +176,7 @@ async def list_items(user=Depends(verify_token)) -> JSONResponse:
     """Returnerer alle items"""
     try:
         result = await get_items()
-        logger.info("Items hentet")
+        logger.info("Varer hentet")
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
@@ -179,7 +191,7 @@ async def create_item_endpoint(
     """Opretter item"""
     try:
         result = await create_item(data)
-        logger.info("Item oprettet")
+        logger.info("Vare oprettet")
         return JSONResponse(status_code=201, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
@@ -195,7 +207,7 @@ async def update_item_endpoint(
     """Opdaterer item"""
     try:
         result = await update_item(item_id, data)
-        logger.info("Item opdateret")
+        logger.info("Vare opdateret")
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
@@ -207,7 +219,7 @@ async def delete_item_endpoint(item_id: str, user=Depends(verify_token)) -> JSON
     """Sletter item"""
     try:
         result = await delete_item(item_id)
-        logger.info("Item slettet")
+        logger.info("Vare slettet")
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
