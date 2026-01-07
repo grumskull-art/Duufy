@@ -24,6 +24,7 @@ from database import (
     update_item,
     update_user,
 )
+from history_service import calculate_median_purchase_pattern
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +249,24 @@ async def create_history_endpoint(
         result = await create_history_entry(data)
         logger.info("Historik oprettet")
         return JSONResponse(status_code=201, content={"status": "ok", "data": result})
+    except Exception as e:
+        logger.error("Fejl i endpoint: %s", e)
+        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+
+
+@app.get("/history/patterns")
+async def get_history_patterns(user=Depends(verify_token)) -> JSONResponse:
+    """Returnerer medianm\u00f8nstre pr. bruger"""
+    try:
+        user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        if not user_id:
+            logger.warning("Bruger-id mangler i token")
+            return JSONResponse(status_code=400, content={"fejl": "Bruger-id mangler"})
+        result = await calculate_median_purchase_pattern(user_id)
+        if isinstance(result, JSONResponse):
+            return result
+        logger.info("Historikm\u00f8nster returneret for bruger %s", user_id)
+        return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
         return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
