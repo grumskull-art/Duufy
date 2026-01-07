@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Duufy group storage layer.
 
 This module is imported by FastAPI routes. It MUST be safe to import in production.
@@ -7,7 +9,18 @@ Public API: legacy function names are preserved (create_group, get_groups, ...)
 so the rest of the codebase does not need to change.
 """
 
-from __future__ import annotations
+import os
+from dotenv import load_dotenv
+
+# Absolut sti til .env (robust for Codex)
+env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(env_path)
+
+# Bekræft miljøet (kan slettes efter test)
+if not os.getenv("SUPABASE_URL"):
+    print("WARN: .env ikke fundet af Codex! Korer fallback...")
+else:
+    print("OK: Miljovariabler indlaest korrekt.")
 
 import asyncio
 import json

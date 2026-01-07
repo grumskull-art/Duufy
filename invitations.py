@@ -9,8 +9,7 @@ import secrets
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from db import safe_read_json, safe_update_json
-from database import safe_write_json
+from database import safe_read_json, safe_write_json
 
 # Prøv at importere resend, men lad det fejle gracefully
 try:
@@ -30,34 +29,34 @@ USERS_FILE = DATA_DIR / "users.json"
 # Resend API key
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 
-def load_invitations():
+async def load_invitations():
     """Loader alle invitationer fra JSON-fil (thread-safe)"""
-    return safe_read_json(INVITATIONS_FILE, {"invitations": {}})
+    return await safe_read_json(INVITATIONS_FILE, {"invitations": {}})
 
-def save_invitations(data):
+async def save_invitations(data):
     """Gemmer invitationer til JSON-fil (thread-safe)"""
-    safe_write_json(INVITATIONS_FILE, data)
+    await safe_write_json(INVITATIONS_FILE, data)
 
-def load_users():
+async def load_users():
     """Loader alle brugere fra JSON-fil (thread-safe)"""
-    return safe_read_json(USERS_FILE, {"users": {}})
+    return await safe_read_json(USERS_FILE, {"users": {}})
 
-def save_users(data):
+async def save_users(data):
     """Gemmer brugere til JSON-fil (thread-safe)"""
-    safe_write_json(USERS_FILE, data)
+    await safe_write_json(USERS_FILE, data)
 
 def generate_invite_token():
     """Genererer en unik invitation-token"""
     return secrets.token_urlsafe(16)
 
-def create_invitation(group_id: str, group_name: str, inviter_name: str, email: str, base_url: str):
+async def create_invitation(group_id: str, group_name: str, inviter_name: str, email: str, base_url: str):
     """
     Opretter en invitation og sender email
     Returns: dict med status og token
     """
     token = generate_invite_token()
     
-    data = load_invitations()
+    data = await load_invitations()
     
     # Tjek om email allerede er inviteret til denne gruppe
     for inv_token, inv in data["invitations"].items():
@@ -82,7 +81,7 @@ def create_invitation(group_id: str, group_name: str, inviter_name: str, email: 
     }
     
     data["invitations"][token] = invitation
-    save_invitations(data)
+    await save_invitations(data)
     
     # Send email
     invite_url = f"{base_url}/invite/{token}"
@@ -151,9 +150,9 @@ def send_invitation_email(to_email: str, inviter_name: str, group_name: str, inv
         print(f"Email fejl: {e}")
         return False
 
-def get_invitation(token: str):
+async def get_invitation(token: str):
     """Henter en invitation fra token"""
-    data = load_invitations()
+    data = await load_invitations()
     invitation = data["invitations"].get(token)
     
     if not invitation:
@@ -163,18 +162,18 @@ def get_invitation(token: str):
     expires = datetime.fromisoformat(invitation["expires"])
     if datetime.utcnow() > expires:
         invitation["status"] = "expired"
-        save_invitations(data)
+        await save_invitations(data)
         return None
     
     return invitation
 
-def accept_invitation(token: str, user_name: str):
+async def accept_invitation(token: str, user_name: str):
     """
     Accepterer en invitation og tilføjer bruger til gruppen
     """
     from database import add_member_to_group
     
-    data = load_invitations()
+    data = await load_invitations()
     invitation = data["invitations"].get(token)
     
     if not invitation:
@@ -187,21 +186,21 @@ def accept_invitation(token: str, user_name: str):
     expires = datetime.fromisoformat(invitation["expires"])
     if datetime.utcnow() > expires:
         invitation["status"] = "expired"
-        save_invitations(data)
+        await save_invitations(data)
         return {"success": False, "message": "Invitation er udløbet"}
     
     # Tilføj bruger til gruppe
-    success = add_member_to_group(invitation["group_id"], user_name)
+    success = await add_member_to_group(invitation["group_id"], user_name)
     
     if success:
         # Marker invitation som accepteret
         invitation["status"] = "accepted"
         invitation["accepted_by"] = user_name
         invitation["accepted_at"] = datetime.utcnow().isoformat()
-        save_invitations(data)
+        await save_invitations(data)
         
         # Opret/opdater bruger
-        users_data = load_users()
+        users_data = await load_users()
         email = invitation["email"]
         if email not in users_data["users"]:
             users_data["users"][email] = {
@@ -213,7 +212,7 @@ def accept_invitation(token: str, user_name: str):
         else:
             if invitation["group_id"] not in users_data["users"][email].get("groups", []):
                 users_data["users"][email].setdefault("groups", []).append(invitation["group_id"])
-        save_users(users_data)
+        await save_users(users_data)
         
         return {
             "success": True, 
@@ -224,9 +223,9 @@ def accept_invitation(token: str, user_name: str):
     else:
         return {"success": False, "message": "Kunne ikke tilføje til gruppen - du er måske allerede medlem"}
 
-def get_pending_invitations(group_id: str):
+async def get_pending_invitations(group_id: str):
     """Henter alle ventende invitationer for en gruppe"""
-    data = load_invitations()
+    data = await load_invitations()
     pending = []
     
     for token, inv in data["invitations"].items():

@@ -27,4 +27,8 @@ data/*.json
 # Local-only artifacts
 duufy-backup.bundle
 static_search.txt
+api.zip
+api/
+debug_env_path.py
+tests/
 

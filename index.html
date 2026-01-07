@@ -994,7 +994,7 @@
             <div class="inline-hint" id="clearHint" aria-live="polite"></div>
     
     <!-- Flydende mikrofon-knap -->
-    <button type="button" id="floatingMic" class="floating-mic" title="Hold for at tale">🎤</button>
+    <button type="button" id="floatingMic" class="floating-mic" title="Tryk for at tale">🎤</button>
     <div class="floating-mic-label" id="floatingMicLabel">🎤 Taler...</div>
 
             <div class="items-list" id="itemsList">
@@ -1180,8 +1180,6 @@
                 if (added) {
                     document.getElementById('itemForm').reset();
                     document.getElementById('itemQuantity').value = '1';
-                    recordedTranscript = '';
-                    interimTranscript = '';
                     lastSpeechText = '';
                     lastSpeechAlternatives = [];
                     document.getElementById('itemName').focus();
@@ -2223,44 +2221,11 @@
         }
 
         let isRecording = false;
-        let recordedTranscript = '';
-        let interimTranscript = '';
         let lastSpeechText = '';
         let lastSpeechAlternatives = [];
         let recStartedAt = 0;
         let timerInterval = null;
         let lastToggleAt = 0;
-        
-        // Lydeffekter med Web Audio API
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        
-        function playBeep(frequency, duration, type = 'sine') {
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            
-            oscillator.frequency.value = frequency;
-            oscillator.type = type;
-            
-            gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
-            
-            oscillator.start(audioCtx.currentTime);
-            oscillator.stop(audioCtx.currentTime + duration);
-        }
-        
-        function playStartSound() {
-            // En kort stigende tone
-            playBeep(700, 0.15);
-        }
-        
-        function playStopSound() {
-            // En kort faldende tone
-            playBeep(500, 0.15);
-        }
-        
         function initMicButton() {
             const floatingMic = document.getElementById('floatingMic');
             if (!floatingMic) return;
@@ -2319,8 +2284,6 @@
 
             isRecording = true;
             recStartedAt = Date.now();
-            recordedTranscript = '';
-            interimTranscript = '';
             lastSpeechText = '';
             lastSpeechAlternatives = [];
 
@@ -2408,14 +2371,16 @@
         async function parseAudioBlob(blob) {
             if (!blob || blob.size === 0) return false;
             try {
+                console.log('[mic] upload start', { size: blob.size, type: blob.type });
                 const formData = new FormData();
                 const ext = blob.type.includes('ogg') ? 'ogg'
                     : blob.type.includes('mp4') ? 'mp4'
                     : 'webm';
                 formData.append('audio', blob, `recording.${ext}`);
                 formData.append('added_by', currentUser || '');
+                formData.append('group_id', currentGroup || '');
 
-                const response = await fetch(`${API_URL}/ai/parse`, {
+                const response = await fetch(`${API_URL}/ai/parse-audio`, {
                     method: 'POST',
                     body: formData
                 });
@@ -2425,31 +2390,22 @@
                 }
 
                 const result = await response.json();
-                const text = (result.text || result.transcript || result.raw_text || '').trim();
-                const itemNameInput = document.getElementById('itemName');
+                console.log('[mic] upload ok', result);
 
-                if (text) {
-                    console.log('[mic] audio parsed text:', text);
-                    if (itemNameInput) itemNameInput.value = text;
-                    await parseViaBackend(text, [], currentUser);
+                const parsedItems = Array.isArray(result.items) ? result.items : [];
+                const items = parsedItems.map(item => ({
+                    name: item.name || item.item || '',
+                    quantity: item.quantity || '1'
+                })).filter(item => item.name);
+
+                if (items.length > 0) {
+                    await addMultipleItems(items);
                     return true;
-                }
-
-                if (Array.isArray(result.items) && result.items.length > 0) {
-                    const names = result.items
-                        .map(item => item.name || item.item || '')
-                        .filter(Boolean);
-                    if (names.length) {
-                        const combined = names.join(', ');
-                        if (itemNameInput) itemNameInput.value = combined;
-                        await parseViaBackend(combined, [], currentUser);
-                        return true;
-                    }
                 }
 
                 return false;
             } catch (err) {
-                console.log('[mic] audio parse failed', err);
+                console.log('[mic] upload fail', err);
                 showMessage('❌ Kunne ikke parse lyd', 'error');
                 return false;
             }
@@ -2996,4 +2952,3 @@
     </script>
 </body>
 </html>
-
