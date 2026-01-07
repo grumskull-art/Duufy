@@ -603,3 +603,61 @@ async def delete_group(group_id: str) -> bool:
 
 async def update_item_quantity(group_id: str, item_name: str, new_quantity: str) -> bool:
     return await _store().update_item_quantity(group_id, item_name, new_quantity)
+
+
+# Supabase placeholders
+
+
+async def get_users() -> dict:
+    """Placeholder: Henter brugere fra Supabase"""
+    return {"message": "stubbed get_users"}
+
+
+async def create_user(data: dict) -> dict:
+    """Placeholder: Opretter bruger i Supabase"""
+    return {"message": "stubbed create_user", "data": data}
+
+
+async def update_user(user_id: str, data: dict) -> dict:
+    """Placeholder: Opdaterer bruger i Supabase"""
+    return {"message": "stubbed update_user", "user_id": user_id, "data": data}
+
+
+async def delete_user(user_id: str) -> dict:
+    """Placeholder: Sletter bruger i Supabase"""
+    return {"message": "stubbed delete_user", "user_id": user_id}
+
+
+async def update_group(group_id: str, data: dict) -> dict:
+    """Placeholder: Opdaterer gruppe i Supabase"""
+    return {"message": "stubbed update_group", "group_id": group_id, "data": data}
+
+
+async def get_items() -> dict:
+    """Placeholder: Henter items fra Supabase"""
+    return {"message": "stubbed get_items"}
+
+
+async def create_item(data: dict) -> dict:
+    """Placeholder: Opretter item i Supabase"""
+    return {"message": "stubbed create_item", "data": data}
+
+
+async def update_item(item_id: str, data: dict) -> dict:
+    """Placeholder: Opdaterer item i Supabase"""
+    return {"message": "stubbed update_item", "item_id": item_id, "data": data}
+
+
+async def delete_item(item_id: str) -> dict:
+    """Placeholder: Sletter item i Supabase"""
+    return {"message": "stubbed delete_item", "item_id": item_id}
+
+
+async def get_history() -> dict:
+    """Placeholder: Henter historik fra Supabase"""
+    return {"message": "stubbed get_history"}
+
+
+async def create_history_entry(data: dict) -> dict:
+    """Placeholder: Tilfoejer historik i Supabase"""
+    return {"message": "stubbed create_history_entry", "data": data}
