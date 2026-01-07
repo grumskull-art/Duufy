@@ -8,6 +8,7 @@ from fastapi import Body, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from auth import verify_token
+from ai_mealplan import generate_mealplan
 from database import (
     create_group,
     create_history_entry,
@@ -262,6 +263,19 @@ async def get_history_patterns(user=Depends(verify_token)) -> JSONResponse:
         result = await calculate_median_purchase_pattern(user_id)
         logger.info("Historikm\u00f8nster returneret for bruger %s", user_id)
         return JSONResponse(status_code=200, content={"status": "ok", "pattern": result})
+    except Exception as e:
+        logger.error("Fejl i endpoint: %s", e)
+        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+
+
+@app.get("/ai/mealplan")
+async def get_ai_mealplan(user=Depends(verify_token)) -> JSONResponse:
+    """Returnerer AI-madplan"""
+    try:
+        user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        result = await generate_mealplan(user_id)
+        logger.info("Madplan returneret for bruger %s", user_id)
+        return JSONResponse(status_code=200, content={"status": "ok", "madplan": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
         return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
