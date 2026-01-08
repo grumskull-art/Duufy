@@ -1,0 +1,6 @@
+{
+  "appId": "com.duufy.app",
+  "appName": "Duufy",
+  "webDir": "public",
+  "bundledWebRuntime": false
+}

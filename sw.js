@@ -1,5 +1,5 @@
 // Duufy Service Worker for offline support
-const CACHE_NAME = 'duufy-v1';
+const CACHE_NAME = 'duufy-cache-v2';
 const urlsToCache = [
   '/app',
   '/manifest.json'
@@ -26,6 +26,7 @@ self.addEventListener('fetch', event => {
 
 // Activate
 self.addEventListener('activate', event => {
+  console.log('[Duufy] Aktiverer service worker og rydder gamle caches');
   event.waitUntil(
     caches.keys().then(cacheNames => {
       return Promise.all(

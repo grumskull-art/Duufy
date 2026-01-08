@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Duufy</string>
+    <string name="title_activity_main">Duufy</string>
+    <string name="package_name">com.duufy.app</string>
+    <string name="custom_url_scheme">com.duufy.app</string>
+</resources>

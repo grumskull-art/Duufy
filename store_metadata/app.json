@@ -1,0 +1,8 @@
+{
+  "appName": "Duufy",
+  "packageName": "com.duufy.app",
+  "shortDescription": "Dansk AI indkoebsassistent",
+  "fullDescription": "Duufy hjaelper med indkoeb og madplaner baseret paa historik.",
+  "defaultLanguage": "da-DK",
+  "contactEmail": "support@duufy.app"
+}
