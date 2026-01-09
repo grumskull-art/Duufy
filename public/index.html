@@ -1009,9 +1009,15 @@
         </div>
     </div>
 
+    <script type="module">
+        window.__VITE_API_URL__ = (import.meta.env && import.meta.env.VITE_API_URL) || '';
+    </script>
     <script>
         // Brug samme host som browseren (virker på både PC og telefon)
-        const API_URL = `${window.location.protocol}//${window.location.host}`;
+        const API_URL =
+            location.hostname === 'localhost'
+                ? 'http://10.0.2.2:8000'
+                : window.__VITE_API_URL__ || 'https://duufy-api.fly.dev';
         const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
         function debugLog(label, data) {
             if (!DEBUG) return;
