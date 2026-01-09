@@ -7,6 +7,13 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Body, Request, HTTPException
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
@@ -769,6 +776,11 @@ async def validate_parse_result(
         raise
     except Exception as e:
         return {"success": False, "error": str(e)}
+    
+    if __name__ == "__main__":
+    import uvicorn, os
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+
 
 
 
