@@ -7,7 +7,10 @@ import main
 def _client_with_data(monkeypatch, tmp_path, items, active_groups):
     items_path = tmp_path / "items.json"
     monkeypatch.setattr(database, "_ITEMS_FILE_DEFAULT", items_path)
-    monkeypatch.setattr(database, "get_active_groups", lambda: list(active_groups))
+    monkeypatch.setattr(
+        database,
+        "get_active_groups",
+        lambda: list(active_groups))
     database.safe_write_json(items_path, items)
     return TestClient(main.app)
 

@@ -16,6 +16,7 @@ async def verify_token(authorization: str = Header(None)):
         )
 
     from supabase_client import get_user
+
     result = get_user(token)
     if not result.get("success"):
         raise HTTPException(

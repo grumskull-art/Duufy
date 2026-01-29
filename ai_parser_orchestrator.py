@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from ai_provider import get_ai_parser
 from ai_parser_ai_contract import AIParsePayload, validate_ai_payload
-from ai_parser_contract import (
-    PARSE_RESULT_ADAPTER,
-    ParseResult,
-    fallback_parse,
-)
+from ai_parser_contract import (PARSE_RESULT_ADAPTER, ParseResult,
+                                fallback_parse)
+from ai_provider import get_ai_parser
 
 
 def should_use_ai(raw: str, force_ai: bool = False) -> bool:

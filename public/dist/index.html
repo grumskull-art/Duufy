@@ -900,6 +900,7 @@
             color: white;
         }
     </style>
+  <script type="module" crossorigin src="/assets/index-CyE3Jes9.js"></script>
 </head>
 <body>
     <div class="login-modal" id="loginModal">
@@ -1011,7 +1012,10 @@
 
     <script>
         // Brug samme host som browseren (virker på både PC og telefon)
-        const API_URL = `${window.location.protocol}//${window.location.host}`;
+        const API_URL =
+            location.hostname === 'localhost'
+                ? 'http://10.0.2.2:8000'
+                : window.__VITE_API_URL__ || 'https://duufy-api.fly.dev';
         const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1';
         function debugLog(label, data) {
             if (!DEBUG) return;

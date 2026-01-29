@@ -1,5 +1,6 @@
 import speech_recognition as sr
 
+
 def recognize_speech():
     r = sr.Recognizer()
     with sr.Microphone() as source:
@@ -12,6 +13,7 @@ def recognize_speech():
         except Exception as e:
             print("❌ Kunne ikke genkende tale:", e)
             return None
+
 
 if __name__ == "__main__":
     recognize_speech()

@@ -1,6 +1,7 @@
 """
 Test email invitation
 """
+
 from invitations import create_invitation
 
 # Test invitation
@@ -13,10 +14,10 @@ result = create_invitation(
     group_name="Test Familie",
     inviter_name="Thore",
     email=test_email,
-    base_url="https://unsophomoric-nila-collaterally.ngrok-free.dev"
+    base_url="https://unsophomoric-nila-collaterally.ngrok-free.dev",
 )
 
-print("\n" + "="*50)
+print("\n" + "=" * 50)
 if result["success"]:
     print("✅ EMAIL SENDT!")
     print(f"📧 Til: {test_email}")
@@ -26,4 +27,4 @@ if result["success"]:
 else:
     print("❌ FEJL!")
     print(f"Message: {result['message']}")
-print("="*50)
+print("=" * 50)

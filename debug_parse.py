@@ -1,5 +1,6 @@
 """Debug parsing pipeline"""
-from ai_parser_optimized import local_parse, _clean_fillers, _SPLIT_PATTERN
+
+from ai_parser_optimized import _SPLIT_PATTERN, _clean_fillers, local_parse
 
 text = "jeg skal have øllebørd, ost, agurker, så skal jeg huske marmelade, riberhus mellemlagret ost"
 

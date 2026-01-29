@@ -14,9 +14,10 @@ GRATIS STACK:
 - Supabase: 500MB + 50k users gratis
 """
 
+import os
 import subprocess
 import sys
-import os
+
 
 def run_cmd(cmd, capture=False):
     """Kør kommando og vis output"""
@@ -27,19 +28,20 @@ def run_cmd(cmd, capture=False):
         else:
             subprocess.run(cmd, shell=True, check=True)
             return True
-    except:
+    except BaseException:
         return False
+
 
 def check_tools():
     """Check om nødvendige tools er installeret"""
     print("\n📋 CHECKER TOOLS...")
-    
+
     tools = {
-        'git': 'git --version',
-        'flyctl': 'flyctl version',
-        'docker': 'docker --version'
+        "git": "git --version",
+        "flyctl": "flyctl version",
+        "docker": "docker --version",
     }
-    
+
     missing = []
     for name, cmd in tools.items():
         result = run_cmd(cmd, capture=True)
@@ -48,42 +50,47 @@ def check_tools():
         else:
             print(f"  ❌ {name}: MANGLER")
             missing.append(name)
-    
+
     return missing
+
 
 def install_flyctl():
     """Installer Fly.io CLI"""
     print("\n📦 INSTALLERER FLY.IO CLI...")
-    
-    if sys.platform == 'win32':
+
+    if sys.platform == "win32":
         cmd = 'powershell -Command "iwr https://fly.io/install.ps1 -useb | iex"'
     else:
-        cmd = 'curl -L https://fly.io/install.sh | sh'
-    
+        cmd = "curl -L https://fly.io/install.sh | sh"
+
     run_cmd(cmd)
     print("  → Genstart terminal efter installation!")
 
+
 def main():
-    print("""
+    print(
+        """
 ╔══════════════════════════════════════════════════════════════╗
 ║                   🚀 DUUFY DEPLOYMENT                        ║
 ║                                                              ║
 ║  Lokal dev (ngrok) → Push til GitHub → Auto-deploy Fly.io   ║
 ╚══════════════════════════════════════════════════════════════╝
-    """)
-    
+    """
+    )
+
     # Check tools
     missing = check_tools()
-    
-    if 'flyctl' in missing:
+
+    if "flyctl" in missing:
         print("\n⚠️  Fly.io CLI mangler!")
         install = input("   Vil du installere nu? (j/n): ")
-        if install.lower() == 'j':
+        if install.lower() == "j":
             install_flyctl()
             print("\n   🔄 Kør dette script igen efter installation")
             return
-    
-    print("""
+
+    print(
+        """
 ╔══════════════════════════════════════════════════════════════╗
 ║                    📝 SETUP STEPS                            ║
 ╚══════════════════════════════════════════════════════════════╝
@@ -111,7 +118,7 @@ STEP 2: FLY.IO SETUP
    flyctl auth login
    cd "c:\\Users\\Grums\\test python"
    flyctl launch --no-deploy
-   
+
    (Svar: Yes til existing fly.toml, vælg Amsterdam region)
 
 
@@ -171,14 +178,16 @@ flyctl scale count 1   # Kør altid 1 instance (ingen cold start)
       ↓                    ↓                    ↓
    Test hurtigt      Auto-deploy        Altid online
    Hot-reload        GitHub Actions     Gratis 24/7
-""")
-    
+"""
+    )
+
     print("\n✅ Filerne er klar!")
     print("   - Dockerfile")
     print("   - fly.toml")
     print("   - .github/workflows/deploy.yml")
     print("   - .dockerignore")
     print("\n🎯 Start med STEP 1 ovenfor!")
+
 
 if __name__ == "__main__":
     main()

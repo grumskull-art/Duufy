@@ -1,51 +1,32 @@
 """
-🧩 Codex Macro: Complete automation pipeline with Recovery Mode
-Kører lint-fix, cleanup, build og deploy i ét flow,
-logger alt og fortsætter selv hvis et step fejler.
+Codex Macro: Complete automation pipeline with recovery mode.
+Runs lint, cleanup, build, and deploy in one flow and logs output.
 """
 
-import subprocess
 import datetime
+import io
 import os
-from codex_utils import run
+import sys
 
-# 1️⃣ Setup
+from codex_utils import run_step as run
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+
 os.makedirs("codex_tasks", exist_ok=True)
 stamp = datetime.date.today().isoformat()
 logfile = f"codex_tasks/auto_all_{stamp}.md"
-
-steps = [
-    ("Lint & Format Fix", "python codex_tasks/fix_lint.py"),
-    ("Cleanup & Dependencies", "python codex_tasks/auto_cleanup.py"),
-    ("Android Build", "python codex_tasks/auto_build.py"),
-    ("Backend Deploy", "python codex_tasks/auto_deploy.py"),
-]
+os.environ["CODEX_LOG_FILE"] = logfile
 
 with open(logfile, "w", encoding="utf-8") as log:
     log.write(f"# [Codex Operation] Auto Macro Run {stamp}\n\n")
 
-    print("🚀 Starter Codex Macro Flow...\n")
-    for title, cmd in steps:
-        section = f"## {title}\n"
-        print(section)
-        log.write(section + "\n")
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        log.write("```\n" + result.stdout + "\n" + result.stderr + "\n```\n\n")
-        if result.returncode != 0:
-            error_msg = f"⚠️  Step '{title}' fejlede, men Codex fortsætter.\n"
-            print(error_msg)
-            log.write(error_msg + "\n")
-        else:
-            log.write(f"✅  Step '{title}' udført uden fejl.\n\n")
+run("Lint & Format Fix", "python codex_tasks/fix_lint.py")
+run("Cleanup & Dependencies", "python codex_tasks/auto_cleanup.py")
+run("Android Build", "python codex_tasks/auto_build.py")
+run("Backend Deploy", "python codex_tasks/auto_deploy.py")
 
-# 2️⃣ Commit + Push logfil
-commit_cmds = [
-    f"git add {logfile}",
-    f'git commit -m "Codex: auto macro run {stamp}"',
-    "git push origin duufy-v1.1-fixes"
-]
+run("Git add auto_all log", f"git add {logfile}")
+run("Git commit auto_all log", f'git commit -m "Codex: auto macro run {stamp}"')
+run("Git push auto_all log", "git push origin duufy-v1.1-fixes")
 
-for cmd in commit_cmds:
-    run(cmd)
-
-print("\n✅ Codex Macro complete – se logfil i codex_tasks/")
+print("Codex macro complete. See codex_tasks for logs.")

@@ -1,29 +1,34 @@
-import os, subprocess, datetime
+import datetime
+import io
+import os
+import sys
 
-def run(cmd):
-    print(f"🧩 {cmd}")
-    subprocess.run(cmd, shell=True, check=False)
+from codex_utils import run_step
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 stamp = datetime.date.today().isoformat()
 os.makedirs("codex_tasks", exist_ok=True)
-log = f"codex_tasks/cleanup_{stamp}.md"
+logfile = f"codex_tasks/cleanup_{stamp}.md"
+os.environ["CODEX_LOG_FILE"] = logfile
 
-commands = [
-    "black . --line-length 88",
-    "isort .",
-    "flake8 > codex_tasks/lint_report.txt",
-    "pip install -r requirements.txt --upgrade",
-]
+with open(logfile, "w", encoding="utf-8") as log:
+    log.write(f"# [Codex Operation] Cleanup {stamp}\n\n")
 
-for c in commands:
-    run(c)
+run_step("Black format", "black . --line-length 88")
+run_step("Sort imports", "isort .")
 
-with open(log, "w") as f:
-    f.write(f"# [Codex Operation] Cleanup {stamp}\n")
+lint_report = "codex_tasks/lint_report.txt"
+lint_result = run_step("Flake8 report", "flake8")
+if lint_result:
+    with open(lint_report, "w", encoding="utf-8") as report:
+        report.write(lint_result.stdout or "")
+        report.write(lint_result.stderr or "")
 
-# Commit og push til GitHub
-run(f'git add {log} codex_tasks/lint_report.txt')
-run(f'git commit -m "Codex: cleanup {stamp}"')
-run("git push origin duufy-v1.1-fixes")
+run_step("Install requirements", "pip install -r requirements.txt --upgrade")
 
-print("✅ Cleanup done and pushed to GitHub.")
+run_step("Git add logs", f"git add {logfile} {lint_report}")
+run_step("Git commit cleanup", f'git commit -m "Codex: cleanup {stamp}"')
+run_step("Git push cleanup", "git push origin duufy-v1.1-fixes")
+
+print("Cleanup complete and pushed.")

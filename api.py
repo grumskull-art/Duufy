@@ -1,31 +1,20 @@
-import sys
-import os
 import logging
-
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+import os
+import sys
 
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from auth import verify_token
 from ai_mealplan import generate_mealplan
-from database import (
-    create_group,
-    create_history_entry,
-    create_item,
-    create_user,
-    delete_group,
-    delete_item,
-    delete_user,
-    get_groups,
-    get_history,
-    get_items,
-    get_users,
-    update_group,
-    update_item,
-    update_user,
-)
+from auth import verify_token
+from database import (create_group, create_history_entry, create_item,
+                      create_user, delete_group, delete_item, delete_user,
+                      get_groups, get_history, get_items, get_users,
+                      update_group, update_item, update_user)
 from history_service import calculate_median_purchase_pattern
+
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +38,9 @@ async def on_shutdown() -> None:
 @app.exception_handler(Exception)
 async def handle_exceptions(request: Request, exc: Exception) -> JSONResponse:
     logger.error("Fejl: %s", exc)
-    return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+    return JSONResponse(
+        status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+    )
 
 
 @app.middleware("http")
@@ -72,7 +63,9 @@ async def list_users(user=Depends(verify_token)) -> JSONResponse:
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.post("/users")
@@ -87,7 +80,9 @@ async def create_user_endpoint(
         return JSONResponse(status_code=201, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.put("/users/{user_id}")
@@ -103,11 +98,15 @@ async def update_user_endpoint(
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.delete("/users/{user_id}")
-async def delete_user_endpoint(user_id: str, user=Depends(verify_token)) -> JSONResponse:
+async def delete_user_endpoint(
+    user_id: str, user=Depends(verify_token)
+) -> JSONResponse:
     """Sletter bruger"""
     try:
         result = await delete_user(user_id)
@@ -115,7 +114,9 @@ async def delete_user_endpoint(user_id: str, user=Depends(verify_token)) -> JSON
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.get("/groups")
@@ -127,7 +128,9 @@ async def list_groups(user=Depends(verify_token)) -> JSONResponse:
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.post("/groups")
@@ -142,7 +145,9 @@ async def create_group_endpoint(
         return JSONResponse(status_code=201, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.put("/groups/{group_id}")
@@ -158,11 +163,15 @@ async def update_group_endpoint(
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.delete("/groups/{group_id}")
-async def delete_group_endpoint(group_id: str, user=Depends(verify_token)) -> JSONResponse:
+async def delete_group_endpoint(
+    group_id: str, user=Depends(verify_token)
+) -> JSONResponse:
     """Sletter gruppe"""
     try:
         result = await delete_group(group_id)
@@ -170,7 +179,9 @@ async def delete_group_endpoint(group_id: str, user=Depends(verify_token)) -> JS
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.get("/items")
@@ -182,7 +193,9 @@ async def list_items(user=Depends(verify_token)) -> JSONResponse:
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.post("/items")
@@ -197,7 +210,9 @@ async def create_item_endpoint(
         return JSONResponse(status_code=201, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.put("/items/{item_id}")
@@ -213,11 +228,15 @@ async def update_item_endpoint(
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.delete("/items/{item_id}")
-async def delete_item_endpoint(item_id: str, user=Depends(verify_token)) -> JSONResponse:
+async def delete_item_endpoint(
+    item_id: str, user=Depends(verify_token)
+) -> JSONResponse:
     """Sletter item"""
     try:
         result = await delete_item(item_id)
@@ -225,7 +244,9 @@ async def delete_item_endpoint(item_id: str, user=Depends(verify_token)) -> JSON
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.get("/history")
@@ -237,7 +258,9 @@ async def list_history(user=Depends(verify_token)) -> JSONResponse:
         return JSONResponse(status_code=200, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.post("/history")
@@ -252,30 +275,44 @@ async def create_history_endpoint(
         return JSONResponse(status_code=201, content={"status": "ok", "data": result})
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.get("/history/patterns")
 async def get_history_patterns(user=Depends(verify_token)) -> JSONResponse:
     """Returnerer medianm\u00f8nstre pr. bruger"""
     try:
-        user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        user_id = (
+            user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        )
         result = await calculate_median_purchase_pattern(user_id)
         logger.info("Historikm\u00f8nster returneret for bruger %s", user_id)
-        return JSONResponse(status_code=200, content={"status": "ok", "pattern": result})
+        return JSONResponse(
+            status_code=200, content={"status": "ok", "pattern": result}
+        )
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 @app.get("/ai/mealplan")
 async def get_ai_mealplan(user=Depends(verify_token)) -> JSONResponse:
     """Returnerer AI-madplan"""
     try:
-        user_id = user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        user_id = (
+            user.get("id") if isinstance(user, dict) else getattr(user, "id", None)
+        )
         result = await generate_mealplan(user_id)
         logger.info("Madplan returneret for bruger %s", user_id)
-        return JSONResponse(status_code=200, content={"status": "ok", "madplan": result})
+        return JSONResponse(
+            status_code=200, content={"status": "ok", "madplan": result}
+        )
     except Exception as e:
         logger.error("Fejl i endpoint: %s", e)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )

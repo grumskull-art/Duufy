@@ -1,5 +1,6 @@
 """Debug 'også' issue"""
-from ai_parser_optimized import _clean_fillers, _SPLIT_PATTERN, local_parse
+
+from ai_parser_optimized import _SPLIT_PATTERN, _clean_fillers, local_parse
 
 text = "mælk, så skal jeg huske brød, også ost"
 
@@ -18,7 +19,7 @@ print()
 
 # Check if each part starts with "også"
 for p in parts:
-    if p.strip().lower().startswith('også'):
+    if p.strip().lower().startswith("også"):
         print(f"⚠️  Part starts with 'også': {repr(p)}")
 
 result = local_parse(text)

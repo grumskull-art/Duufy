@@ -1,11 +1,11 @@
 import firebase_admin
 from firebase_admin import messaging
 
+
 def send_push_notification(tokens, title, body):
     try:
         message = messaging.MulticastMessage(
-            notification=messaging.Notification(title=title, body=body),
-            tokens=tokens
+            notification=messaging.Notification(title=title, body=body), tokens=tokens
         )
         response = messaging.send_multicast(message)
         print(f"📱 Sent {response.success_count} notifications.")

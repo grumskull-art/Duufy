@@ -16,7 +16,7 @@ test_cases = [
 ]
 
 passed = sum(
-    all(exp in [i['item'] for i in local_parse(text)] for exp in expected)
+    all(exp in [i["item"] for i in local_parse(text)] for exp in expected)
     for text, expected in test_cases
 )
 

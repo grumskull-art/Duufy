@@ -1,18 +1,25 @@
-import os, subprocess, datetime
-def run(cmd): subprocess.run(cmd, shell=True, check=False)
+import datetime
+import io
+import os
+import sys
+
+from codex_utils import run_step
+
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 stamp = datetime.date.today().isoformat()
-log = f"codex_tasks/build_{stamp}.md"
+logfile = f"codex_tasks/build_{stamp}.md"
 os.makedirs("codex_tasks", exist_ok=True)
+os.environ["CODEX_LOG_FILE"] = logfile
 
-run("npx cap sync android")
-run("cd android && ./gradlew assembleRelease")
+with open(logfile, "w", encoding="utf-8") as log:
+    log.write(f"# [Codex Operation] Build {stamp}\n\n")
 
-with open(log, "w") as f:
-    f.write(f"# [Codex Operation] Build {stamp}\n")
+run_step("Capacitor sync", "npx cap sync android")
+run_step("Gradle assembleRelease", r"cd android; .\\gradlew assembleRelease")
 
-run(f"git add {log}")
-run(f'git commit -m "Codex: build {stamp}"')
-run("git push origin duufy-v1.1-fixes")
+run_step("Git add build log", f"git add {logfile}")
+run_step("Git commit build", f'git commit -m "Codex: build {stamp}"')
+run_step("Git push build", "git push origin duufy-v1.1-fixes")
 
-print("✅ Android build complete and pushed.")
+print("Android build complete and pushed.")

@@ -1,5 +1,4 @@
 price = 10
 rating = 4.9
-name = 'Mosh'
+name = "Mosh"
 is_published = True
-

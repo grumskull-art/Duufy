@@ -1,6 +1,7 @@
 import os
-from dotenv import load_dotenv
+
 import firebase_admin
+from dotenv import load_dotenv
 from firebase_admin import credentials
 
 # Indlæs .env fil

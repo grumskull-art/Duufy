@@ -1,26 +1,30 @@
 """
 Database operations with file locking to prevent race conditions
 """
+
 import json
 import logging
-from pathlib import Path
-from typing import Dict, Any
-from filelock import FileLock
 import threading
+from pathlib import Path
+from typing import Any, Dict
+
+from filelock import FileLock
 
 # Thread-safe locks for each file
 _locks = {}
 _lock_mutex = threading.Lock()
 logger = logging.getLogger(__name__)
 
+
 def get_file_lock(filepath: Path) -> FileLock:
     """Get or create a FileLock for a given file"""
     lock_path = str(filepath) + ".lock"
-    
+
     with _lock_mutex:
         if lock_path not in _locks:
             _locks[lock_path] = FileLock(lock_path, timeout=10)
         return _locks[lock_path]
+
 
 def _cleanup_tmp_files(filepath: Path) -> None:
     directory = filepath.parent
@@ -33,37 +37,41 @@ def _cleanup_tmp_files(filepath: Path) -> None:
             except OSError:
                 pass
 
+
 def safe_read_json(filepath: Path, default: Any = None) -> Any:
     """Thread-safe JSON file reading with file locking"""
     if not filepath.exists():
         return default if default is not None else {}
-    
+
     lock = get_file_lock(filepath)
     with lock:
         _cleanup_tmp_files(filepath)
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Failed to read JSON file %s: %s", filepath, exc)
             backup_path = Path(str(filepath) + ".bak")
             if backup_path.exists():
                 try:
-                    with open(backup_path, 'r', encoding='utf-8') as f:
+                    with open(backup_path, "r", encoding="utf-8") as f:
                         return json.load(f)
                 except (json.JSONDecodeError, OSError) as backup_exc:
-                    logger.warning("Failed to read JSON backup %s: %s", backup_path, backup_exc)
+                    logger.warning(
+                        "Failed to read JSON backup %s: %s", backup_path, backup_exc
+                    )
             return default if default is not None else {}
+
 
 def safe_update_json(filepath: Path, update_func, default: Any = None) -> Any:
     """
     Thread-safe JSON update with file locking
-    
+
     Args:
         filepath: Path to JSON file
         update_func: Function that takes current data and returns updated data
         default: Default value if file doesn't exist
-        
+
     Returns:
         Updated data
     """
@@ -71,19 +79,19 @@ def safe_update_json(filepath: Path, update_func, default: Any = None) -> Any:
     with lock:
         # Read current data
         if filepath.exists():
-            with open(filepath, 'r', encoding='utf-8') as f:
+            with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
         else:
             data = default if default is not None else {}
-        
+
         # Update data
         updated_data = update_func(data)
-        
+
         # Write back
         filepath.parent.mkdir(parents=True, exist_ok=True)
-        temp_file = filepath.with_suffix('.tmp')
-        with open(temp_file, 'w', encoding='utf-8') as f:
+        temp_file = filepath.with_suffix(".tmp")
+        with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(updated_data, f, indent=2, ensure_ascii=False)
         temp_file.replace(filepath)
-        
+
         return updated_data

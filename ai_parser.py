@@ -3,19 +3,24 @@ AI-powered parser til indkøbslister
 Bruger lokal regex først, falder tilbage til Claude API ved usikkerhed
 """
 
-import re
-import os
 import json
+import os
+import re
 import string
 import unicodedata
-from functools import lru_cache
-from typing import List, Dict, Optional
 from difflib import get_close_matches
+from functools import lru_cache
+from typing import Dict, List, Optional
+
+import httpx
+from fastapi import HTTPException
+
 from ai_provider import get_client
 
 # Load .env fil
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass  # dotenv ikke installeret, brug miljøvariabler direkte
@@ -23,6 +28,7 @@ except ImportError:
 # Prøv at importere Anthropic (valgfri)
 try:
     from anthropic import Anthropic
+
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
@@ -31,49 +37,120 @@ except ImportError:
 # Kategorier til varer
 CATEGORIES = {
     # Mejeri
-    'mælk': 'mejeri', 'letmælk': 'mejeri', 'minimælk': 'mejeri', 'sødmælk': 'mejeri',
-    'smør': 'mejeri', 'ost': 'mejeri', 'fløde': 'mejeri', 'piskefløde': 'mejeri',
-    'yoghurt': 'mejeri', 'skyr': 'mejeri', 'cremefraiche': 'mejeri',
-    'kærnemælk': 'mejeri', 'ymer': 'mejeri', 'mozzarella': 'mejeri',
+    "mælk": "mejeri",
+    "letmælk": "mejeri",
+    "minimælk": "mejeri",
+    "sødmælk": "mejeri",
+    "smør": "mejeri",
+    "ost": "mejeri",
+    "fløde": "mejeri",
+    "piskefløde": "mejeri",
+    "yoghurt": "mejeri",
+    "skyr": "mejeri",
+    "cremefraiche": "mejeri",
+    "kærnemælk": "mejeri",
+    "ymer": "mejeri",
+    "mozzarella": "mejeri",
     # Kød
-    'kylling': 'kød', 'oksekød': 'kød', 'hakket': 'kød', 'hakkekød': 'kød',
-    'svinekød': 'kød', 'bacon': 'kød', 'pølser': 'kød', 'hamburgerryg': 'kød',
-    'rullepølse': 'kød', 'leverpostej': 'kød', 'skinke': 'kød',
-    'medister': 'kød', 'kalvekød': 'kød', 'lammekød': 'kød',
+    "kylling": "kød",
+    "oksekød": "kød",
+    "hakket": "kød",
+    "hakkekød": "kød",
+    "svinekød": "kød",
+    "bacon": "kød",
+    "pølser": "kød",
+    "hamburgerryg": "kød",
+    "rullepølse": "kød",
+    "leverpostej": "kød",
+    "skinke": "kød",
+    "medister": "kød",
+    "kalvekød": "kød",
+    "lammekød": "kød",
     # Fisk
-    'laks': 'fisk', 'tun': 'fisk', 'torsk': 'fisk', 'rejer': 'fisk',
+    "laks": "fisk",
+    "tun": "fisk",
+    "torsk": "fisk",
+    "rejer": "fisk",
     # Brød
-    'brød': 'bager', 'rugbrød': 'bager', 'franskbrød': 'bager', 'boller': 'bager',
+    "brød": "bager",
+    "rugbrød": "bager",
+    "franskbrød": "bager",
+    "boller": "bager",
     # Grøntsager
-    'kartofler': 'grønt', 'kartoffel': 'grønt', 'løg': 'grønt', 'hvidløg': 'grønt',
-    'gulerødder': 'grønt', 'gulerod': 'grønt', 'tomater': 'grønt', 'tomat': 'grønt',
-    'agurk': 'grønt', 'salat': 'grønt', 'peberfrugt': 'grønt', 'broccoli': 'grønt',
+    "kartofler": "grønt",
+    "kartoffel": "grønt",
+    "løg": "grønt",
+    "hvidløg": "grønt",
+    "gulerødder": "grønt",
+    "gulerod": "grønt",
+    "tomater": "grønt",
+    "tomat": "grønt",
+    "agurk": "grønt",
+    "salat": "grønt",
+    "peberfrugt": "grønt",
+    "broccoli": "grønt",
     # Frugt
-    'æbler': 'frugt', 'æble': 'frugt', 'bananer': 'frugt', 'banan': 'frugt',
-    'appelsiner': 'frugt', 'appelsin': 'frugt', 'pærer': 'frugt', 'citroner': 'frugt',
+    "æbler": "frugt",
+    "æble": "frugt",
+    "bananer": "frugt",
+    "banan": "frugt",
+    "appelsiner": "frugt",
+    "appelsin": "frugt",
+    "pærer": "frugt",
+    "citroner": "frugt",
     # Drikkevarer
-    'juice': 'drikkevarer', 'cola': 'drikkevarer', 'sodavand': 'drikkevarer',
-    'øl': 'drikkevarer', 'vin': 'drikkevarer', 'vand': 'drikkevarer',
-    'kaffe': 'drikkevarer', 'te': 'drikkevarer',
+    "juice": "drikkevarer",
+    "cola": "drikkevarer",
+    "sodavand": "drikkevarer",
+    "øl": "drikkevarer",
+    "vin": "drikkevarer",
+    "vand": "drikkevarer",
+    "kaffe": "drikkevarer",
+    "te": "drikkevarer",
     # Kolonial
-    'pasta': 'kolonial', 'ris': 'kolonial', 'mel': 'kolonial', 'sukker': 'kolonial',
-    'salt': 'kolonial', 'olie': 'kolonial', 'ketchup': 'kolonial', 'sennep': 'kolonial',
-    'mayonnaise': 'kolonial', 'remoulade': 'kolonial',
+    "pasta": "kolonial",
+    "ris": "kolonial",
+    "mel": "kolonial",
+    "sukker": "kolonial",
+    "salt": "kolonial",
+    "olie": "kolonial",
+    "ketchup": "kolonial",
+    "sennep": "kolonial",
+    "mayonnaise": "kolonial",
+    "remoulade": "kolonial",
     # Husholdning
-    'toiletpapir': 'husholdning', 'køkkenrulle': 'husholdning', 'sæbe': 'husholdning',
+    "toiletpapir": "husholdning",
+    "køkkenrulle": "husholdning",
+    "sæbe": "husholdning",
     # Æg
-    'æg': 'æg'
+    "æg": "æg",
 }
 
 # Standard mængder per kategori/vare
 DEFAULT_QUANTITIES = {
-    'mejeri': '1 L', 'kød': '500 g', 'fisk': '400 g', 'bager': '1 stk',
-    'grønt': '1 stk', 'frugt': '1 stk', 'drikkevarer': '1 L',
-    'kolonial': '1 stk', 'husholdning': '1 pk', 'æg': '10 stk',
+    "mejeri": "1 L",
+    "kød": "500 g",
+    "fisk": "400 g",
+    "bager": "1 stk",
+    "grønt": "1 stk",
+    "frugt": "1 stk",
+    "drikkevarer": "1 L",
+    "kolonial": "1 stk",
+    "husholdning": "1 pk",
+    "æg": "10 stk",
     # Specifikke varer
-    'smør': '250 g', 'ost': '400 g', 'bacon': '1 pk', 'pølser': '1 pk',
-    'kartofler': '1 kg', 'løg': '1 net', 'æbler': '1 kg', 'bananer': '1 bundt',
-    'pasta': '500 g', 'ris': '1 kg', 'mel': '1 kg', 'sukker': '1 kg',
+    "smør": "250 g",
+    "ost": "400 g",
+    "bacon": "1 pk",
+    "pølser": "1 pk",
+    "kartofler": "1 kg",
+    "løg": "1 net",
+    "æbler": "1 kg",
+    "bananer": "1 bundt",
+    "pasta": "500 g",
+    "ris": "1 kg",
+    "mel": "1 kg",
+    "sukker": "1 kg",
 }
 
 # Kendt produktliste til fuzzy matching
@@ -81,43 +158,53 @@ KNOWN_PRODUCTS = list(CATEGORIES.keys())
 
 # Forkortelser og almindelige stavefejl
 PRODUCT_ALIASES = {
-    'hambo': 'hamburgerryg',
-    'remu': 'remoulade',
-    'karto': 'kartofler',
-    'toma': 'tomater',
-    'gule': 'gulerødder',
-    'sømælk': 'sødmælk',
-    'smæølk': 'sødmælk',
-    'piskflø': 'piskefløde',
-    'rugbrø': 'rugbrød',
-    'franskbrø': 'franskbrød',
-    'lever': 'leverpostej',
-    'rulle': 'rullepølse',
+    "hambo": "hamburgerryg",
+    "remu": "remoulade",
+    "karto": "kartofler",
+    "toma": "tomater",
+    "gule": "gulerødder",
+    "sømælk": "sødmælk",
+    "smæølk": "sødmælk",
+    "piskflø": "piskefløde",
+    "rugbrø": "rugbrød",
+    "franskbrø": "franskbrød",
+    "lever": "leverpostej",
+    "rulle": "rullepølse",
 }
+
 
 def fuzzy_correct(word: str) -> str:
     """Prøv at rette stavefejl og forkortelser med fuzzy matching"""
     word_lower = word.lower()
-    
+
     # Check direkte aliases først
     if word_lower in PRODUCT_ALIASES:
         return PRODUCT_ALIASES[word_lower]
-    
+
     # Brug fuzzy matching på kendte produkter
     matches = get_close_matches(word_lower, KNOWN_PRODUCTS, n=1, cutoff=0.7)
     if matches:
         return matches[0]
-    
+
     return word
+
 
 # Mængde-mønster - mere præcist
 AMOUNT_PATTERN = re.compile(
     r"^(\d+(?:[.,]\d+)?)\s*(l|liter|ml|dl|cl|stk|stykker?|pakke|pakker|pk|poser?|g|gram|kg|kilo|fl|flaske|flasker|ds|d\u00e5se|d\u00e5ser|bundt|net)?\s+",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 STOPWORDS = {
-    "og", "en", "et", "nej", "bare", "tak", "\u00f8h", "\u00f8hm", "ehm",
+    "og",
+    "en",
+    "et",
+    "nej",
+    "bare",
+    "tak",
+    "\u00f8h",
+    "\u00f8hm",
+    "ehm",
 }
 
 NUMBER_WORDS = {
@@ -157,14 +244,40 @@ ALLOWED_MULTIWORD_ITEMS = {
 
 MAX_ITEM_TOKENS = 6
 STOP_PREFIXES_DA = [
-    "jeg skal", "vi skal", "jeg vil", "vi vil",
-    "skal have", "vil have",
-    "køb", "hent", "find", "tilføj", "skriv",
-    "jeg vil gerne", "vi vil gerne", "jeg skal have", "vi skal have",
-    "mangler", "vi mangler",
+    "jeg skal",
+    "vi skal",
+    "jeg vil",
+    "vi vil",
+    "skal have",
+    "vil have",
+    "køb",
+    "hent",
+    "find",
+    "tilføj",
+    "skriv",
+    "jeg vil gerne",
+    "vi vil gerne",
+    "jeg skal have",
+    "vi skal have",
+    "mangler",
+    "vi mangler",
 ]
 STOP_PREFIXES_EN = ["i need", "we need", "buy", "get", "add", "find", "please"]
-STOP_TOKENS = {"jeg", "vi", "skal", "vil", "køb", "hent", "find", "tilføj", "skriv", "hos", "fra", "please"}
+STOP_TOKENS = {
+    "jeg",
+    "vi",
+    "skal",
+    "vil",
+    "køb",
+    "hent",
+    "find",
+    "tilføj",
+    "skriv",
+    "hos",
+    "fra",
+    "please",
+}
+
 
 def _normalize_item_text(value: str) -> str:
     if not isinstance(value, str):
@@ -176,6 +289,7 @@ def _normalize_item_text(value: str) -> str:
         return ""
     text = re.sub(r"\b(\w+)(\s+\1\b)+", r"\1", text)
     return text
+
 
 def strict_sanitize_items(items: List[str]) -> List[str]:
     sanitized: List[str] = []
@@ -194,7 +308,7 @@ def strict_sanitize_items(items: List[str]) -> List[str]:
                     trimmed = True
                     break
                 if cleaned.startswith(prefix + " "):
-                    cleaned = cleaned[len(prefix):].strip()
+                    cleaned = cleaned[len(prefix) :].strip()
                     trimmed = True
                     break
             if trimmed:
@@ -231,6 +345,7 @@ def strict_sanitize_items(items: List[str]) -> List[str]:
 
     return deduped
 
+
 def canonicalize_items(raw_items: List[str]) -> List[str]:
     normalized: List[str] = []
     for raw in raw_items:
@@ -259,6 +374,7 @@ def canonicalize_items(raw_items: List[str]) -> List[str]:
 
     survivors = strict_sanitize_items(survivors)
     return survivors
+
 
 def _canonicalize_item_dicts(items: List[Dict[str, object]]) -> List[Dict[str, object]]:
     names: List[str] = []
@@ -296,6 +412,7 @@ def _canonicalize_item_dicts(items: List[Dict[str, object]]) -> List[Dict[str, o
 
     return result
 
+
 def _parse_number(token: str) -> Optional[str]:
     if token in NUMBER_WORDS:
         return NUMBER_WORDS[token]
@@ -303,8 +420,10 @@ def _parse_number(token: str) -> Optional[str]:
         return token.replace(",", ".")
     return None
 
+
 def _is_unit(token: str) -> bool:
     return any(token in variants for variants in UNIT_ALIASES.values())
+
 
 def _normalize_unit(token: str, num: str) -> str:
     if token in UNIT_ALIASES["liter"]:
@@ -320,6 +439,7 @@ def _normalize_unit(token: str, num: str) -> str:
     if token in UNIT_ALIASES["d\u00e5se"]:
         return "d\u00e5se" if num == "1" else "d\u00e5ser"
     return token
+
 
 def deterministic_parse(text: str) -> List[Dict[str, object]]:
     if not text or not text.strip():
@@ -357,7 +477,8 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
                     break
                 if next_token:
                     current_name_tokens = [
-                        t for t in current
+                        t
+                        for t in current
                         if t not in STOPWORDS
                         and t not in conjunctions
                         and not _parse_number(t)
@@ -371,7 +492,9 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
                         and next_is_word
                         and (current_name_tokens[0], next_token) in keep_pairs
                     )
-                    if current_name_tokens and (next_is_number or (next_is_word and not keep_pair)):
+                    if current_name_tokens and (
+                        next_is_number or (next_is_word and not keep_pair)
+                    ):
                         segments.append(current)
                         current = []
                         i += 1
@@ -411,7 +534,13 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
             if not filtered:
                 continue
 
-            if not num and not unit and "salt" in tokens and "og" in tokens and "peber" in tokens:
+            if (
+                not num
+                and not unit
+                and "salt" in tokens
+                and "og" in tokens
+                and "peber" in tokens
+            ):
                 name = "salt og peber"
             else:
                 name = " ".join(filtered).strip()
@@ -439,33 +568,35 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
 
     return items
 
+
 def normalize_unit(unit: str, num: Optional[str] = None) -> str:
     unit_lower = unit.lower()
-    if unit_lower in ['l', 'liter']:
-        return 'liter'
-    if unit_lower in ['kg', 'kilo']:
-        return 'kg'
-    if unit_lower in ['g', 'gram']:
-        return 'g'
-    if unit_lower in ['ml', 'milliliter']:
-        return 'ml'
-    if unit_lower in ['dl', 'deciliter']:
-        return 'dl'
-    if unit_lower in ['cl', 'centiliter']:
-        return 'cl'
-    if unit_lower in ['stk', 'stykker', 'stykke']:
-        return 'stk'
-    if unit_lower in ['pk', 'pakke', 'pakker']:
-        return 'pakke' if num == '1' else 'pakker'
-    if unit_lower in ['pose', 'poser']:
-        return 'pose' if num == '1' else 'poser'
-    if unit_lower in ['fl', 'flaske', 'flasker']:
-        return 'flaske' if num == '1' else 'flasker'
-    if unit_lower in ['ds', 'd\u00e5se', 'd\u00e5ser']:
-        return 'd\u00e5se' if num == '1' else 'd\u00e5ser'
-    if unit_lower in ['bundt', 'net']:
+    if unit_lower in ["l", "liter"]:
+        return "liter"
+    if unit_lower in ["kg", "kilo"]:
+        return "kg"
+    if unit_lower in ["g", "gram"]:
+        return "g"
+    if unit_lower in ["ml", "milliliter"]:
+        return "ml"
+    if unit_lower in ["dl", "deciliter"]:
+        return "dl"
+    if unit_lower in ["cl", "centiliter"]:
+        return "cl"
+    if unit_lower in ["stk", "stykker", "stykke"]:
+        return "stk"
+    if unit_lower in ["pk", "pakke", "pakker"]:
+        return "pakke" if num == "1" else "pakker"
+    if unit_lower in ["pose", "poser"]:
+        return "pose" if num == "1" else "poser"
+    if unit_lower in ["fl", "flaske", "flasker"]:
+        return "flaske" if num == "1" else "flasker"
+    if unit_lower in ["ds", "d\u00e5se", "d\u00e5ser"]:
+        return "d\u00e5se" if num == "1" else "d\u00e5ser"
+    if unit_lower in ["bundt", "net"]:
         return unit_lower
     return unit
+
 
 def get_category(item_name: str) -> str:
     """Find kategori for en vare"""
@@ -473,54 +604,65 @@ def get_category(item_name: str) -> str:
     for key, category in CATEGORIES.items():
         if key in item_lower:
             return category
-    return 'andet'
+    return "andet"
+
 
 def get_default_quantity(item_name: str) -> str:
     """Gaet standard maengde for en vare"""
     return "1"
+
 
 def smart_split_by_products(text: str) -> List[str]:
     """Splitter tekst ved kendte produkter for at adskille varer uden separator"""
     words = text.strip().split()
     if len(words) <= 2:
         return [text]
-    
+
     parts = []
     current_part = []
     last_product_idx = -1
-    
+
     for i, word in enumerate(words):
         # Check om ordet er et kendt produkt
-        is_product = any(word == p or word.startswith(p) or p.startswith(word) 
-                        for p in CATEGORIES.keys())
-        
+        is_product = any(
+            word == p or word.startswith(p) or p.startswith(word)
+            for p in CATEGORIES.keys()
+        )
+
         # Check om næste ord starter en ny mængde
-        next_word = words[i + 1] if i < len(words) - 1 else ''
-        next_is_quantity = bool(re.match(r'^(\d+|en|et|to|tre|fire|fem|halvanden)$', next_word, re.IGNORECASE))
-        next_is_product = any(next_word == p or next_word.startswith(p) or p.startswith(next_word) 
-                              for p in CATEGORIES.keys())
-        
+        next_word = words[i + 1] if i < len(words) - 1 else ""
+        next_is_quantity = bool(
+            re.match(
+                r"^(\d+|en|et|to|tre|fire|fem|halvanden)$", next_word, re.IGNORECASE
+            )
+        )
+        next_is_product = any(
+            next_word == p or next_word.startswith(p) or p.startswith(next_word)
+            for p in CATEGORIES.keys()
+        )
+
         current_part.append(word)
-        
+
         if is_product:
             last_product_idx = len(current_part) - 1
-            
+
             # Hvis næste ord er mængde eller nyt produkt, afslut denne del
             if next_is_quantity or (next_is_product and i < len(words) - 1):
-                parts.append(' '.join(current_part))
+                parts.append(" ".join(current_part))
                 current_part = []
                 last_product_idx = -1
-    
+
     # Tilføj resterende ord
     if current_part:
-        parts.append(' '.join(current_part))
-    
+        parts.append(" ".join(current_part))
+
     return parts if parts else [text]
+
 
 def local_parse(text: str) -> List[Dict]:
     """Parser tekst med regex - hurtig lokal parsing"""
     text = text.lower().strip()
-    
+
     # Fjern fyldord fra starten - MEGET mere omfattende
     fillers = [
         r"^(øh|ehm|øhm|nå|nåh|altså|ikke|jo|bare)\s+",
@@ -533,7 +675,7 @@ def local_parse(text: str) -> List[Dict]:
         r"^(tilføj|køb|hent|tag|skriv|sæt)\s+",
         r"^(en|et|den|det)\s+(?!liter|kilo|kg|l\s)",  # Men ikke før enheder
     ]
-    
+
     # Kør fyldords-fjernelse flere gange for at fange alle
     for _ in range(3):  # Max 3 iterationer
         old_text = text
@@ -541,76 +683,100 @@ def local_parse(text: str) -> List[Dict]:
             text = re.sub(filler, "", text, flags=re.IGNORECASE)
         if text == old_text:  # Ingen ændringer mere
             break
-    
+
     # Split på eksplicitte separatorer
     parts = re.split(r"\s+og\s+|\s*,\s*|\s+samt\s+|\s+plus\s+", text)
-    
+
     # For hver del, prøv at splitte på kendte produkter
     all_parts = []
     for part in parts:
         all_parts.extend(smart_split_by_products(part))
-    
+
     parsed_items = []
-    
+
     # Ordtal til tal mapping
     word_to_num = {
-        'en': '1', 'et': '1', 'to': '2', 'tre': '3', 'fire': '4', 'fem': '5',
-        'seks': '6', 'syv': '7', 'otte': '8', 'ni': '9', 'ti': '10',
-        'halvanden': '1.5', 'halvandet': '1.5'
+        "en": "1",
+        "et": "1",
+        "to": "2",
+        "tre": "3",
+        "fire": "4",
+        "fem": "5",
+        "seks": "6",
+        "syv": "7",
+        "otte": "8",
+        "ni": "9",
+        "ti": "10",
+        "halvanden": "1.5",
+        "halvandet": "1.5",
     }
-    
+
     for part in all_parts:
         part = part.strip()
         if not part or len(part) < 2:
             continue
-        
+
         item_name = part
         quantity = ""
-        
+
         # Prøv specielle mønstre først
-        
+
         # "tre/fire/fem kilo/liter X" (ordtal + enhed)
-        ordtal_match = re.match(r"^(en|et|to|tre|fire|fem|seks|syv|otte|ni|ti|halvanden|halvandet)\s+(liter|l|ml|dl|cl|stk|stykker|stykke|pakke|pakker|pk|poser|pose|g|gram|kg|kilo|fl|flaske|flasker|ds|d\u00e5se|d\u00e5ser|bundt|net)\s+(.+)$", part, re.IGNORECASE)
+        ordtal_match = re.match(
+            r"^(en|et|to|tre|fire|fem|seks|syv|otte|ni|ti|halvanden|halvandet)\s+(liter|l|ml|dl|cl|stk|stykker|stykke|pakke|pakker|pk|poser|pose|g|gram|kg|kilo|fl|flaske|flasker|ds|d\u00e5se|d\u00e5ser|bundt|net)\s+(.+)$",
+            part,
+            re.IGNORECASE,
+        )
         if ordtal_match:
             num_word = ordtal_match.group(1).lower()
             unit = ordtal_match.group(2)
             item_name = ordtal_match.group(3).strip()
-            
+
             # Konverter ordtal til tal
             num = word_to_num.get(num_word, num_word)
-            
+
             # Normaliser enhed
             unit = normalize_unit(unit, num)
             quantity = f"{num} {unit}"
-        
+
         # "halvanden liter/kilo X"
-        elif re.match(r"^(halvanden|halvandet)\s+(liter|l|kilo|kg)\s+", part, re.IGNORECASE):
-            halvanden_match = re.match(r"^(halvanden|halvandet)\s+(liter|l|kilo|kg)\s+(.+)$", part, re.IGNORECASE)
+        elif re.match(
+            r"^(halvanden|halvandet)\s+(liter|l|kilo|kg)\s+", part, re.IGNORECASE
+        ):
+            halvanden_match = re.match(
+                r"^(halvanden|halvandet)\s+(liter|l|kilo|kg)\s+(.+)$",
+                part,
+                re.IGNORECASE,
+            )
             if halvanden_match:
                 unit = halvanden_match.group(2)
                 item_name = halvanden_match.group(3).strip()
-                unit_norm = normalize_unit(unit, '1.5')
+                unit_norm = normalize_unit(unit, "1.5")
                 quantity = f"1.5 {unit_norm}"
-        
+
         # "en/et/halv/halvt liter/kilo X"
-        elif re.match(r"^(en|et|halv|halvt)\s+(liter|l|kilo|kg)\s+", part, re.IGNORECASE):
-            unit_match = re.match(r"^(en|et|halv|halvt)\s+(liter|l|kilo|kg)\s+(.+)$", part, re.IGNORECASE)
+        elif re.match(
+            r"^(en|et|halv|halvt)\s+(liter|l|kilo|kg)\s+", part, re.IGNORECASE
+        ):
+            unit_match = re.match(
+                r"^(en|et|halv|halvt)\s+(liter|l|kilo|kg)\s+(.+)$", part, re.IGNORECASE
+            )
             if unit_match:
                 quantity_word = unit_match.group(1).lower()
                 unit_word = unit_match.group(2).lower()
                 item_name = unit_match.group(3).strip()
-                
+
                 # Bestem mængde
-                if quantity_word in ['halv', 'halvt']:
-                    num = '0.5'
+                if quantity_word in ["halv", "halvt"]:
+                    num = "0.5"
                 else:
-                    num = '1'
-                
-                if unit_word in ['liter', 'l']:
+                    num = "1"
+
+                if unit_word in ["liter", "l"]:
                     quantity = f"{num} {normalize_unit(unit_word, num)}"
-                elif unit_word in ['kilo', 'kg']:
+                elif unit_word in ["kilo", "kg"]:
                     quantity = f"{num} {normalize_unit(unit_word, num)}"
-        
+
         # "X l/liter/kg/stk Y"
         elif re.match(r"^\d", part):
             amount_match = AMOUNT_PATTERN.match(part)
@@ -620,32 +786,35 @@ def local_parse(text: str) -> List[Dict]:
                 unit = normalize_unit(unit, num)
                 quantity = f"{num} {unit}"
                 # Resten er item_name
-                item_name = part[amount_match.end():].strip()
-        
+                item_name = part[amount_match.end() :].strip()
+
         # Ryd GRUNDIGT op i item_name - fjern alle fyldord
-        item_name = re.sub(r"^(en|et|den|det|noget|nogen|nogle|lidt|den der|det der)\s+", "", item_name, flags=re.IGNORECASE)
+        item_name = re.sub(
+            r"^(en|et|den|det|noget|nogen|nogle|lidt|den der|det der)\s+",
+            "",
+            item_name,
+            flags=re.IGNORECASE,
+        )
         item_name = re.sub(r"^(den|det|der)\s+", "", item_name, flags=re.IGNORECASE)
         item_name = item_name.strip()
-        
+
         if not item_name:
             continue
-        
+
         # Prøv fuzzy correction på produktnavnet
         item_name = fuzzy_correct(item_name)
-        
+
         # Sæt default mængde hvis ikke fundet
         if not quantity:
             quantity = get_default_quantity(item_name)
-        
+
         # Find kategori
         category = get_category(item_name)
-        
-        parsed_items.append({
-            "item": item_name.capitalize(),
-            "quantity": quantity,
-            "category": category
-        })
-    
+
+        parsed_items.append(
+            {"item": item_name.capitalize(), "quantity": quantity, "category": category}
+        )
+
     # Fjern duplikater - behold første forekomst
     seen = set()
     unique_items = []
@@ -654,22 +823,23 @@ def local_parse(text: str) -> List[Dict]:
         if item_key not in seen:
             seen.add(item_key)
             unique_items.append(item)
-    
+
     return unique_items
+
 
 def opus_parse(text: str) -> List[Dict]:
     """Parser tekst med Claude API - for komplekse sætninger"""
     if not ANTHROPIC_AVAILABLE:
         return []
-    
+
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
         print("⚠️ ANTHROPIC_API_KEY ikke sat")
         return []
-    
+
     try:
         client = get_client()
-        
+
         prompt = f"""Du er en intelligent dansk indkøbsassistent. Brugeren taler ofte UTYDELIGT med dårligt/mumlet dansk.
 Dit job: Forstå hvad de MENER og udtræk kun de relevante produkter.
 
@@ -707,45 +877,52 @@ mejeri, kød, fisk, bager, grønt, frugt, drikkevarer, kolonial, husholdning, æ
 
 🔧 OUTPUT (KUN JSON):
 [
-  {{"item": "Produktnavn", "quantity": "1 enhed", "category": "kategori"}}
+  {"item": "Produktnavn", "quantity": "1 enhed", "category": "kategori"}
 ]
 
 🎤 BRUGERENS UTYDELIGE TALE:
 "{text}"
 
 RETURNÉR KUN JSON!"""
-        
+
         response = client.messages.create(
             model="claude-3-5-sonnet-20241022",  # Bedre kvalitet, stadig billig
             max_tokens=800,
             temperature=0.3,  # Lav temperatur for konsistens
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            timeout=60.0,
         )
-        
+
         result_text = response.content[0].text.strip()
-        
+
         # Fjern eventuelle markdown code blocks
         if result_text.startswith("```"):
             result_text = re.sub(r"^```(?:json)?\n?", "", result_text)
             result_text = re.sub(r"\n?```$", "", result_text)
-        
+
         parsed = json.loads(result_text)
-        
+
         # Valider at det er en liste
         if not isinstance(parsed, list):
             print(f"⚠️ AI returnerede ikke en liste: {type(parsed)}")
             return []
-        
+
         # Valider hvert item
         valid_items = []
         for item in parsed:
-            if isinstance(item, dict) and "item" in item and "quantity" in item and "category" in item:
+            if (
+                isinstance(item, dict)
+                and "item" in item
+                and "quantity" in item
+                and "category" in item
+            ):
                 valid_items.append(item)
             else:
                 print(f"⚠️ Ugyldigt item fra AI: {item}")
-        
+
         return valid_items
-        
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="AI service timed out")
     except json.JSONDecodeError as e:
         print(f"⚠️ JSON parse fejl: {e}")
         print(f"   Raw response: {result_text[:200]}...")
@@ -753,6 +930,7 @@ RETURNÉR KUN JSON!"""
     except Exception as e:
         print(f"⚠️ Claude API fejl: {e}")
         return []
+
 
 @lru_cache(maxsize=256)
 def smart_parse(text: str, force_ai: bool = False) -> Dict:
@@ -780,7 +958,9 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
     local_result = _canonicalize_item_dicts(local_result)
 
     has_items = len(local_result) > 0
-    all_unknown = all(item["category"] == "andet" for item in local_result) if has_items else True
+    all_unknown = (
+        all(item["category"] == "andet" for item in local_result) if has_items else True
+    )
     short_input = len(text.split()) <= 2
     very_short = len(text.split()) < 4
 
@@ -830,6 +1010,8 @@ def smart_parse(text: str, force_ai: bool = False) -> Dict:
         "original_text": text,
         "used_alternative": None,
     }
+
+
 # Test
 if __name__ == "__main__":
     test_phrases = [
@@ -837,42 +1019,36 @@ if __name__ == "__main__":
         "2 liter mælk",
         "vi mangler mælk og brød",
         "et kilo kartofler hamburgerryg og remoulade",
-        
         # Med fyldord
         "jeg skal have den der sødmælk",
         "vi mangler noget rugbrød",
         "skal have øh tre kilo kartofler",
-        
         # Komplekse
         "halvanden liter mælk og 3 bananer",
         "skal have noget kaffe og toiletpapir",
         "den der remoulade og det der øh bacon",
-        
         # Edge cases
         "det der",  # Meget vagt
         "jeg skal have noget",  # Intet produkt
         "sødmælk",  # Simpelt
     ]
-    
-    print("🧪 Testing AI Parser\n" + "="*50)
+
+    print("🧪 Testing AI Parser\n" + "=" * 50)
     for phrase in test_phrases:
         result = smart_parse(phrase, force_ai=False)
         print(f"\n📝 '{phrase}'")
-        print(f"   Metode: {result['method']} | Tillid: {result['confidence']}")
-        if result['items']:
-            for item in result['items']:
-                print(f"   ✓ {item['item']}: {item['quantity']} ({item['category']})")
+        print(
+            f"   Metode: {
+                result['method']} | Tillid: {
+                result['confidence']}"
+        )
+        if result["items"]:
+            for item in result["items"]:
+                print(
+                    f"   ✓ {
+                        item['item']}: {
+                        item['quantity']} ({
+                        item['category']})"
+                )
         else:
             print("   ✗ Ingen varer fundet")
-
-
-
-
-
-
-
-
-
-
-
-

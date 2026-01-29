@@ -1,5 +1,7 @@
 """Debug brand name handling"""
-from ai_parser_optimized import local_parse, _clean_fillers, _SPLIT_PATTERN, _KNOWN_PRODUCTS
+
+from ai_parser_optimized import (_KNOWN_PRODUCTS, _SPLIT_PATTERN,
+                                 _clean_fillers, local_parse)
 
 text = "riberhus mellemlagret ost"
 

@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
+import shutil
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Protocol
+from uuid import uuid4
+
+import aiofiles
+
+from db import _cleanup_tmp_files, get_file_lock
+
 """Duufy group storage layer.
 
 This module is imported by FastAPI routes. It MUST be safe to import in production.
@@ -10,6 +24,7 @@ so the rest of the codebase does not need to change.
 """
 
 import os
+
 from dotenv import load_dotenv
 
 # Absolut sti til .env (robust for Codex)
@@ -22,19 +37,6 @@ if not os.getenv("SUPABASE_URL"):
 else:
     print("OK: Miljovariabler indlaest korrekt.")
 
-import asyncio
-import json
-import logging
-import os
-import shutil
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Protocol
-from uuid import uuid4
-
-import aiofiles
-from db import get_file_lock, _cleanup_tmp_files
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +45,12 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ----------------------------
 
-_DATA_DIR_DEFAULT = Path("/data") if Path("/data").exists() else Path(__file__).parent / "data"
+_DATA_DIR_DEFAULT = (
+    Path("/data") if Path("/data").exists() else Path(__file__).parent / "data"
+)
 _JSON_FILE_DEFAULT = _DATA_DIR_DEFAULT / "groups.json"
 _ITEMS_FILE_DEFAULT = _DATA_DIR_DEFAULT / "items.json"
+
 
 def _rotate_backups(filepath: Path) -> None:
     backup_path = Path(str(filepath) + ".bak")
@@ -112,7 +117,9 @@ async def safe_read_json(filepath: Path, default: Any = None) -> Any:
                         return default if default is not None else {}
                     return await asyncio.to_thread(json.loads, content)
                 except (json.JSONDecodeError, OSError) as backup_exc:
-                    logger.warning("Failed to read JSON backup %s: %s", backup_path, backup_exc)
+                    logger.warning(
+                        "Failed to read JSON backup %s: %s", backup_path, backup_exc
+                    )
             return default if default is not None else {}
     finally:
         await asyncio.to_thread(lock.release)
@@ -143,7 +150,9 @@ async def safe_write_json(filepath: Path, data: Any) -> None:
 
         temp_file = filepath.with_name(f"{filepath.name}.tmp.{os.getpid()}")
         try:
-            payload = await asyncio.to_thread(json.dumps, data, indent=2, ensure_ascii=False)
+            payload = await asyncio.to_thread(
+                json.dumps, data, indent=2, ensure_ascii=False
+            )
             async with aiofiles.open(temp_file, "w", encoding="utf-8") as f:
                 await f.write(payload)
                 await f.flush()
@@ -213,44 +222,37 @@ def _now_iso() -> str:
 
 
 class GroupStore(Protocol):
-    async def create_group(self, group_name: str, owner_id: str) -> str:
-        ...
+    async def create_group(self, group_name: str, owner_id: str) -> str: ...
 
-    async def get_groups(self) -> List[Dict[str, Any]]:
-        ...
+    async def get_groups(self) -> List[Dict[str, Any]]: ...
 
-    async def add_member_to_group(self, group_id: str, member_name: str) -> bool:
-        ...
+    async def add_member_to_group(self, group_id: str, member_name: str) -> bool: ...
 
-    async def get_group_members(self, group_id: str) -> List[str]:
-        ...
+    async def get_group_members(self, group_id: str) -> List[str]: ...
 
-    async def get_group_owner(self, group_id: str) -> Optional[str]:
-        ...
+    async def get_group_owner(self, group_id: str) -> Optional[str]: ...
 
-    async def set_active_groups(self, group_ids: List[str]) -> bool:
-        ...
+    async def set_active_groups(self, group_ids: List[str]) -> bool: ...
 
-    async def get_active_groups(self) -> List[str]:
-        ...
+    async def get_active_groups(self) -> List[str]: ...
 
-    async def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
-        ...
+    async def add_item_to_groups(
+        self, item_data: Dict[str, Any], group_ids: Optional[List[str]]
+    ) -> bool: ...
 
-    async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
-        ...
+    async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]: ...
 
-    async def delete_item_from_group(self, group_id: str, item_name: str) -> None:
-        ...
+    async def delete_item_from_group(self, group_id: str, item_name: str) -> None: ...
 
-    async def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
-        ...
+    async def remove_member_from_group(
+        self, group_id: str, member_name: str
+    ) -> bool: ...
 
-    async def delete_group(self, group_id: str) -> bool:
-        ...
+    async def delete_group(self, group_id: str) -> bool: ...
 
-    async def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
-        ...
+    async def update_item_quantity(
+        self, group_id: str, item_name: str, new_quantity: str
+    ) -> bool: ...
 
 
 # ----------------------------
@@ -274,12 +276,7 @@ class JsonGroupStore:
     @staticmethod
     def _make_group_id(group_name: str) -> str:
         # Stable, URL-friendly group id
-        return (
-            group_name.strip()
-            .lower()
-            .replace(" ", "_")
-            .replace("-", "_")
-        )
+        return group_name.strip().lower().replace(" ", "_").replace("-", "_")
 
     async def create_group(self, group_name: str, owner_id: str) -> str:
         data = await self._load()
@@ -367,7 +364,9 @@ class JsonGroupStore:
         data = await self._load()
         return list(data.get("active_groups", []) or [])
 
-    async def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
+    async def add_item_to_groups(
+        self, item_data: Dict[str, Any], group_ids: Optional[List[str]]
+    ) -> bool:
         data = await self._load()
         targets = group_ids or data.get("active_groups", []) or []
         if not targets:
@@ -432,7 +431,9 @@ class JsonGroupStore:
         await self._save(data)
         return True
 
-    async def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
+    async def update_item_quantity(
+        self, group_id: str, item_name: str, new_quantity: str
+    ) -> bool:
         data = await self._load()
         group = data.get("groups", {}).get(group_id)
         if not group:
@@ -508,7 +509,9 @@ class FirestoreGroupStore:
     async def get_active_groups(self) -> List[str]:
         self._not_ready()
 
-    async def add_item_to_groups(self, item_data: Dict[str, Any], group_ids: Optional[List[str]]) -> bool:
+    async def add_item_to_groups(
+        self, item_data: Dict[str, Any], group_ids: Optional[List[str]]
+    ) -> bool:
         self._not_ready()
 
     async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
@@ -523,7 +526,9 @@ class FirestoreGroupStore:
     async def delete_group(self, group_id: str) -> bool:
         self._not_ready()
 
-    async def update_item_quantity(self, group_id: str, item_name: str, new_quantity: str) -> bool:
+    async def update_item_quantity(
+        self, group_id: str, item_name: str, new_quantity: str
+    ) -> bool:
         self._not_ready()
 
 
@@ -581,7 +586,9 @@ async def get_active_groups() -> List[str]:
     return await _store().get_active_groups()
 
 
-async def add_item_to_groups(item_data: Dict[str, Any], group_ids: Optional[List[str]] = None) -> bool:
+async def add_item_to_groups(
+    item_data: Dict[str, Any], group_ids: Optional[List[str]] = None
+) -> bool:
     return await _store().add_item_to_groups(item_data, group_ids)
 
 
@@ -601,7 +608,9 @@ async def delete_group(group_id: str) -> bool:
     return await _store().delete_group(group_id)
 
 
-async def update_item_quantity(group_id: str, item_name: str, new_quantity: str) -> bool:
+async def update_item_quantity(
+    group_id: str, item_name: str, new_quantity: str
+) -> bool:
     return await _store().update_item_quantity(group_id, item_name, new_quantity)
 
 

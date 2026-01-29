@@ -2,7 +2,13 @@
 Duufy Supabase connection test (async)
 """
 
+import asyncio
+import logging
 import os
+from pathlib import Path
+from typing import Any, Optional
+from uuid import uuid4
+
 from dotenv import load_dotenv
 
 # Absolut sti til .env (robust for Codex)
@@ -16,17 +22,9 @@ else:
     print("✅ Miljøvariabler indlæst korrekt.")
 
 
-import asyncio
-import logging
-import os
-from pathlib import Path
-from typing import Any, Optional
-from uuid import uuid4
-
-from dotenv import load_dotenv
-
 try:
     from supabase import create_async_client, create_client
+
     _SUPABASE_IMPORT_ERROR: Optional[Exception] = None
 except Exception as exc:
     create_async_client = None
@@ -70,7 +68,9 @@ def _load_env(logger: logging.Logger) -> None:
         logger.info(".env indlæst fra %s", env_path)
     else:
         load_dotenv()
-        logger.warning("Ingen .env-fil fundet i projektmappen. Bruger miljøvariabler hvis de findes.")
+        logger.warning(
+            "Ingen .env-fil fundet i projektmappen. Bruger miljøvariabler hvis de findes."
+        )
 
 
 def _get_env(logger: logging.Logger) -> tuple[str, str, list[str]]:
@@ -96,9 +96,9 @@ def _get_env(logger: logging.Logger) -> tuple[str, str, list[str]]:
     return url, key, missing
 
 
-
-
-async def _create_client(url: str, key: str, logger: logging.Logger) -> tuple[Any, bool]:
+async def _create_client(
+    url: str, key: str, logger: logging.Logger
+) -> tuple[Any, bool]:
     if _SUPABASE_IMPORT_ERROR is not None:
         logger.error("Supabase-py er ikke installeret: %s", _SUPABASE_IMPORT_ERROR)
         raise RuntimeError("SUPABASE_PY_MISSING")
@@ -109,7 +109,9 @@ async def _create_client(url: str, key: str, logger: logging.Logger) -> tuple[An
             logger.info("Async Supabase-klient oprettet")
             return client, True
         except Exception as exc:
-            logger.warning("Kunne ikke oprette async client, falder tilbage til sync: %s", exc)
+            logger.warning(
+                "Kunne ikke oprette async client, falder tilbage til sync: %s", exc
+            )
 
     if create_client is None:
         raise RuntimeError("SUPABASE_CLIENT_UNAVAILABLE")
@@ -181,7 +183,12 @@ async def test_connection(logger: logging.Logger) -> bool:
         row_id = inserted.get("id") if inserted else None
         logger.info("Insert OK (id=%s)", row_id or "ukendt")
 
-        select_query = client.table("analytics_events").select("*").eq("event_name", event_name).limit(1)
+        select_query = (
+            client.table("analytics_events")
+            .select("*")
+            .eq("event_name", event_name)
+            .limit(1)
+        )
         select_result = await _execute(select_query, use_thread=not is_async)
         error = _get_result_error(select_result)
         if error:
@@ -194,7 +201,9 @@ async def test_connection(logger: logging.Logger) -> bool:
         row_id = selected.get("id") or row_id
         logger.info("Select OK (id=%s)", row_id or "ukendt")
 
-        delete_query = client.table("analytics_events").delete().eq("event_name", event_name)
+        delete_query = (
+            client.table("analytics_events").delete().eq("event_name", event_name)
+        )
         delete_result = await _execute(delete_query, use_thread=not is_async)
         error = _get_result_error(delete_result)
         if error:

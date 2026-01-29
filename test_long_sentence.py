@@ -1,4 +1,5 @@
 """Test lange sætninger som brugeren rapporterer"""
+
 from ai_parser_optimized import local_parse, smart_parse
 
 test_input = "jeg skal have øllebørd, ost, agurker, så skal jeg huske marmelade, riberhus mellemlagret ost"
@@ -18,7 +19,7 @@ print("\n" + "=" * 80)
 
 # Forventede resultater
 expected = ["Øllebrød", "Ost", "Agurker", "Marmelade", "Riberhus mellemlagret ost"]
-found_items = [item['item'] for item in result]
+found_items = [item["item"] for item in result]
 
 print("\n📋 ANALYSE:")
 print(f"Forventet: {expected}")

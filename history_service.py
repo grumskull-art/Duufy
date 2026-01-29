@@ -37,10 +37,14 @@ async def add_history_entry(user_id: str, item_id: str, timestamp: str) -> Any:
             logger.info("Historik opdateret for bruger %s", user_id)
             return {"status": "ok", "data": result.get("data")}
         logger.error("Historik kunne ikke gemmes for bruger %s", user_id)
-        return JSONResponse(status_code=500, content={"fejl": "Kunne ikke gemme historik"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Kunne ikke gemme historik"}
+        )
     except Exception as exc:
         logger.error("Fejl ved historikindsats: %s", exc)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 async def get_user_history(user_id: str) -> Any:
@@ -53,7 +57,9 @@ async def get_user_history(user_id: str) -> Any:
         )
         if not result.get("success"):
             logger.error("Historik kunne ikke hentes for bruger %s", user_id)
-            return JSONResponse(status_code=500, content={"fejl": "Kunne ikke hente historik"})
+            return JSONResponse(
+                status_code=500, content={"fejl": "Kunne ikke hente historik"}
+            )
 
         data = result.get("data") or []
         if not data:
@@ -63,7 +69,9 @@ async def get_user_history(user_id: str) -> Any:
         return {"status": "ok", "data": data}
     except Exception as exc:
         logger.error("Fejl ved historikhaentning: %s", exc)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )
 
 
 async def calculate_median_purchase_pattern(user_id: str) -> Any:
@@ -76,7 +84,9 @@ async def calculate_median_purchase_pattern(user_id: str) -> Any:
         )
         if not result.get("success"):
             logger.error("Historik kunne ikke hentes for bruger %s", user_id)
-            return JSONResponse(status_code=500, content={"fejl": "Kunne ikke beregne historik"})
+            return JSONResponse(
+                status_code=500, content={"fejl": "Kunne ikke beregne historik"}
+            )
 
         entries = result.get("data") or []
         if not entries:
@@ -104,13 +114,13 @@ async def calculate_median_purchase_pattern(user_id: str) -> Any:
             deltas = []
             for first, second in zip(timestamps, timestamps[1:]):
                 deltas.append((second - first).days)
-            medians.append(
-                {"item_id": item_id, "median_days": _median_days(deltas)}
-            )
+            medians.append({"item_id": item_id, "median_days": _median_days(deltas)})
 
         medians.sort(key=lambda entry: entry["median_days"])
         logger.info("Medianm\u00f8nster beregnet for bruger %s", user_id)
         return medians[0]
     except Exception as exc:
         logger.error("Fejl ved medianberegning: %s", exc)
-        return JSONResponse(status_code=500, content={"fejl": "Der opstod en intern serverfejl"})
+        return JSONResponse(
+            status_code=500, content={"fejl": "Der opstod en intern serverfejl"}
+        )

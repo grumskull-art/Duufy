@@ -1,9 +1,10 @@
-import sys, os, importlib.util
+import importlib.util
 import logging
+import os
+import sys
 
 import pytest
 from httpx import AsyncClient
-
 
 # Dynamisk import af api.py (fungerer paa Windows og Linux)
 api_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "api.py"))

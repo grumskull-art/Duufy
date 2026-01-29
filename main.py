@@ -1,35 +1,40 @@
-import asyncio
-import os
-import time
-import traceback
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Body, Request, HTTPException
-from fastapi import FastAPI
-
-app = FastAPI()
-
-@app.get("/health")
-async def health():
-    return {"status": "ok"}
+from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               Response)
 from pydantic import BaseModel
+
 from ai_parser import smart_parse
-from analytics import (
-    get_full_analytics,
-    log_error,
-    track_event,
-    track_user_activity as analytics_track_user_activity,
-    track_user_churn as analytics_track_user_churn,
-    track_user_signup as analytics_track_user_signup,
-)
-from api import auth, groups, items, invites
+from analytics import get_full_analytics, log_error, track_event
+from analytics import track_user_activity as analytics_track_user_activity
+from analytics import track_user_churn as analytics_track_user_churn
+from analytics import track_user_signup as analytics_track_user_signup
+from api import auth, groups, invites, items
+from api.auth import verify_token
 from api.utils import UTF8JSONResponse
 from database import ensure_data_files
+from supabase_client import (SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY,
+                               SUPABASE_URL, check_connection,
+                               shutdown_client, startup_client)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # On startup
+    # Validate essential environment variables
+    if not all([SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY]):
+        raise RuntimeError(
+            "Supabase environment variables (URL, ANON_KEY, SERVICE_KEY) must be set."
+        )
+    
+    await startup_client()
+    await ensure_data_files()
+    yield
+    # On shutdown
+    await shutdown_client()
 
 
 app = FastAPI(
@@ -37,27 +42,23 @@ app = FastAPI(
     description="Do you often forget? Duufy don't - AI-powered shopping list",
     version="1.0.0",
     default_response_class=UTF8JSONResponse,
+    lifespan=lifespan,
 )
-
-app.include_router(auth.router)
-app.include_router(groups.router)
-app.include_router(items.router)
-app.include_router(invites.router)
-
-
-@app.on_event("startup")
-async def startup_event():
-    await ensure_data_files()
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
     """Always return JSON for unhandled errors (prod-safe)."""
-    # NOTE: Detailed stack traces are logged by middleware/uvicorn; do not leak internals to clients.
+    # NOTE: Detailed stack traces are logged by middleware/uvicorn; do not
+    # leak internals to clients.
     return UTF8JSONResponse(
         status_code=500,
-        content={"error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}},
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "Internal Server Error"}},
     )
+
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
@@ -84,15 +85,19 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             500: "INTERNAL_ERROR",
         }.get(exc.status_code, "ERROR")
     if not message:
-        message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+        message = exc.detail if isinstance(
+            exc.detail, str) else "Request failed"
 
     return UTF8JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": code, "message": message}},
     )
 
+
 @app.exception_handler(RequestValidationError)
-async def request_validation_error_handler(request, exc: RequestValidationError):
+async def request_validation_error_handler(
+    request: Request, exc: RequestValidationError
+):
     return JSONResponse(
         status_code=422,
         content={
@@ -104,6 +109,8 @@ async def request_validation_error_handler(request, exc: RequestValidationError)
     )
 
 # ========== AUTOMATIC ERROR TRACKING MIDDLEWARE ==========
+
+
 @app.middleware("http")
 async def block_drive_paths(request: Request, call_next):
     path = request.url.path
@@ -114,35 +121,40 @@ async def block_drive_paths(request: Request, call_next):
         )
     return await call_next(request)
 
+
 @app.middleware("http")
 async def track_errors_and_performance(request: Request, call_next):
     """Automatically log errors and slow requests"""
     start_time = time.time()
-    
+
     try:
         response = await call_next(request)
-        
+
         # Track slow requests (>3 seconds)
         duration = time.time() - start_time
         if duration > 3.0:
-            asyncio.create_task(log_error(
-                error_type="PerformanceWarning",
-                message=f"Slow request: {request.url.path} took {duration:.2f}s",
-                metadata={
-                    "path": request.url.path,
-                    "method": request.method,
-                    "duration": duration
-                }
-            ))
-        
+            asyncio.create_task(
+                log_error(
+                    error_type="PerformanceWarning",
+                    message=(
+                        f"Slow request: {request.url.path} took {duration:.2f}s"
+                    ),
+                    metadata={
+                        "path": request.url.path,
+                        "method": request.method,
+                        "duration": duration,
+                    },
+                )
+            )
+
         return response
-        
+
     except HTTPException:
         raise
     except Exception as e:
         # Automatically log all unhandled exceptions
         duration = time.time() - start_time
-        
+
         asyncio.create_task(log_error(
             error_type=type(e).__name__,
             message=str(e),
@@ -153,17 +165,27 @@ async def track_errors_and_performance(request: Request, call_next):
                 "duration": duration
             }
         ))
-        
+
         # Re-raise the exception so FastAPI handles it
         raise
 
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
+    allow_origins=[
+        origin.strip() for origin in os.getenv(
+            "ALLOWED_ORIGINS",
+            "http://localhost:3000").split(",") if origin.strip()],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=[
+        "GET",
+        "POST",
+        "DELETE",
+        "PATCH",
+        "OPTIONS"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization"],
 )
 
 
@@ -175,10 +197,12 @@ async def read_root():
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
+
 @app.get("/app")
 async def get_app():
     """Returner PWA app"""
     return FileResponse(Path(__file__).parent / "app.html")
+
 
 @app.get("/manifest.json")
 async def get_manifest():
@@ -188,28 +212,57 @@ async def get_manifest():
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
+
 @app.get("/sw.js")
 async def get_service_worker():
     """Service Worker"""
     content = (Path(__file__).parent / "sw.js").read_text()
     return Response(content=content, media_type="application/javascript")
 
+
 @app.get("/health")
 async def health_check():
-    return {"status": "OK", "time": datetime.utcnow().isoformat()}
+    """Perform a live health check of the service and its dependencies."""
+    # Check Supabase connection
+    supabase_status = check_connection()
+    if not supabase_status.get("success"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "unavailable",
+                "service": "database",
+                "error": supabase_status.get("error"),
+            },
+        )
+
+    return {
+        "status": "ok",
+        "services": {
+            "database": {
+                "status": "ok",
+                "details": supabase_status,
+            }
+        },
+        "time": datetime.utcnow().isoformat(),
+    }
+
 
 @app.get("/version")
 async def get_version():
     return {"version": "v1.1", "status": "ok"}
 
 # AI Parser endpoint
+
+
 class ParseRequest(BaseModel):
     text: str
     force_ai: Optional[bool] = False
-    text_alternatives: Optional[list[str]] = None  # Fra speech recognition med multiple alternatives
+    # Fra speech recognition med multiple alternatives
+    text_alternatives: Optional[list[str]] = None
+
 
 @app.post("/ai/parse")
-async def parse_voice_input(request: ParseRequest):
+async def parse_voice_input(request: ParseRequest, _: dict = Depends(verify_token)):
     """
     Parser stemme-input til strukturerede varer.
     Bruger lokal regex først, Claude AI ved usikkerhed.
@@ -220,9 +273,10 @@ async def parse_voice_input(request: ParseRequest):
     if asyncio.iscoroutine(result):
         result = await result
     result = dict(result)
-    
+
     # Hvis dårligt resultat og vi har alternativer, prøv dem
-    if request.text_alternatives and (not result["items"] or result["confidence"] == "low"):
+    if request.text_alternatives and (
+            not result["items"] or result["confidence"] == "low"):
         all_texts = set([request.text] + (request.text_alternatives or []))
         results = []
         for text in all_texts:
@@ -245,10 +299,11 @@ async def parse_voice_input(request: ParseRequest):
             unique_items.append(item)
             seen.add(name)
     result["items"] = unique_items
-    
+
     return result
 
 # ========== SIGNUP / ONBOARDING ENDPOINT ==========
+
 
 @app.get("/signup")
 async def signup_page():
@@ -374,13 +429,13 @@ async def signup_page():
             <div class="logo">🧠</div>
             <h1>Duufy</h1>
             <div class="tagline">Do you often forget? Duufy don't</div>
-            
+
             <div class="description">
                 Din smarte indkøbsliste der husker alt det, du glemmer.
                 Brug stemmen til at tilføje varer, del lister med familien,
                 og lad AI hjælpe dig med at holde styr på indkøbene.
             </div>
-            
+
             <div class="features">
                 <div class="feature">
                     <span class="feature-icon">🎤</span>
@@ -399,7 +454,7 @@ async def signup_page():
                     <span>Billeder på alle produkter</span>
                 </div>
             </div>
-            
+
             <div class="share-section">
                 <div class="share-title">📤 Del Duufy med venner</div>
                 <div class="share-url" id="shareUrl"></div>
@@ -407,17 +462,17 @@ async def signup_page():
                     📋 Kopier Link
                 </button>
             </div>
-            
+
             <div class="footer">
                 Kom i gang ved at downloade appen 🚀
             </div>
         </div>
-        
+
         <script>
             // Set share URL
             const shareUrl = window.location.href;
             document.getElementById('shareUrl').textContent = shareUrl;
-            
+
             function copyUrl() {
                 navigator.clipboard.writeText(shareUrl).then(() => {
                     const btn = document.querySelector('.copy-btn');
@@ -431,7 +486,7 @@ async def signup_page():
     </body>
     </html>
     """
-    
+
     return HTMLResponse(content=html)
 
 
@@ -453,6 +508,7 @@ async def track_analytics_event(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 @app.post("/analytics/signup")
 async def track_signup(
     user_id: str = Body(...),
@@ -468,6 +524,7 @@ async def track_signup(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 @app.post("/analytics/error")
 async def log_app_error(
     error_type: str = Body(...),
@@ -478,12 +535,19 @@ async def log_app_error(
 ):
     """Log application error"""
     try:
-        asyncio.create_task(log_error(error_type, message, user_id, stack_trace, metadata))
+        asyncio.create_task(
+            log_error(
+                error_type,
+                message,
+                user_id,
+                stack_trace,
+                metadata))
         return {"success": True, "message": "Error logged"}
     except HTTPException:
         raise
     except Exception as e:
         return {"success": False, "error": str(e)}
+
 
 @app.post("/analytics/churn")
 async def track_user_churn(
@@ -499,12 +563,13 @@ async def track_user_churn(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
 @app.get("/admin/analytics")
 async def get_analytics_dashboard():
     """Get complete analytics dashboard (ADMIN ONLY)"""
     try:
         data = get_full_analytics()
-        
+
         html = f"""
         <!DOCTYPE html>
         <html lang="da">
@@ -640,7 +705,7 @@ async def get_analytics_dashboard():
                     <span class="stat-label">Total Events</span>
                     <span class="stat-value">{data['events_7days']['total_events']}</span>
                 </div>
-                {"".join(f'<div class="stat-row"><span class="stat-label">{event}</span><span class="stat-value">{count}</span></div>' 
+                {"".join(f'<div class="stat-row"><span class="stat-label">{event}</span><span class="stat-value">{count}</span></div>'
                          for event, count in data['events_7days']['events_by_type'].items())}
             </div>
             
@@ -650,8 +715,8 @@ async def get_analytics_dashboard():
                     <span class="stat-label">Total Errors</span>
                     <span class="stat-value">{data['errors_7days']['total_errors']}</span>
                 </div>
-                {"".join(f'<div class="stat-row"><span class="stat-label">{error_type}</span><span class="stat-value">{count}</span></div>' 
-                         for error_type, count in data['errors_7days']['errors_by_type'].items())}
+                {"".join(f'<div class="stat-row"><span class="stat-label">{error_type}</span><span class="stat-value">{count}</span></div>'
+                             for error_type, count in data['errors_7days']['errors_by_type'].items())}
                 
                 <h3 style="margin-top: 30px; margin-bottom: 15px; color: #666; font-size: 16px;">Recent Errors:</h3>
                 {"".join(f'''<div class="error-item">
@@ -673,20 +738,21 @@ async def get_analytics_dashboard():
                 </div>
                 
                 <h3 style="margin-top: 30px; margin-bottom: 15px; color: #666; font-size: 16px;">Churn Reasons:</h3>
-                {"".join(f'<div class="stat-row"><span class="stat-label">{reason}</span><span class="stat-value">{count}</span></div>' 
-                         for reason, count in data['churn_analysis']['churn_reasons'].items())}
+                {"".join(f'<div class="stat-row"><span class="stat-label">{reason}</span><span class="stat-value">{count}</span></div>'
+                                 for reason, count in data['churn_analysis']['churn_reasons'].items())}
             </div>
-            
+
             <button class="refresh-btn" onclick="location.reload()">🔄 Refresh Data</button>
         </body>
         </html>
         """
-        
+
         return HTMLResponse(content=html)
     except HTTPException:
         raise
     except Exception as e:
         return {"error": str(e)}
+
 
 @app.get("/admin/analytics/json")
 async def get_analytics_json():
@@ -694,6 +760,7 @@ async def get_analytics_json():
     return get_full_analytics()
 
 # ========== USER PROBLEM REPORTING ==========
+
 
 class ProblemReport(BaseModel):
     user_id: str
@@ -704,10 +771,11 @@ class ProblemReport(BaseModel):
     actual_behavior: Optional[str] = None
     metadata: Optional[dict] = None
 
+
 @app.post("/report-problem")
 async def report_problem(report: ProblemReport):
     """Let users report bugs and issues"""
-    
+
     try:
         # Log as error
         asyncio.create_task(log_error(
@@ -722,13 +790,13 @@ async def report_problem(report: ProblemReport):
                 **(report.metadata or {})
             }
         ))
-        
+
         # Also track as event
         asyncio.create_task(track_event(report.user_id, "problem_reported", {
             "type": report.problem_type,
             "screen": report.screen
         }))
-        
+
         return {
             "success": True,
             "message": "Tak for din feedback! Vi kigger på det.",
@@ -750,7 +818,7 @@ async def validate_parse_result(
     was_correct: bool = Body(...)
 ):
     """Track if AI parsing was correct (user feedback)"""
-    
+
     try:
         if not was_correct:
             # Log as parsing error
@@ -764,27 +832,25 @@ async def validate_parse_result(
                     "user_feedback": "incorrect"
                 }
             ))
-        
+
         asyncio.create_task(track_event(user_id, "parse_feedback", {
             "was_correct": was_correct,
             "input_length": len(input_text),
             "items_count": len(parsed_items)
         }))
-        
+
         return {"success": True, "message": "Feedback modtaget"}
     except HTTPException:
         raise
     except Exception as e:
         return {"success": False, "error": str(e)}
-    
+
     if __name__ == "__main__":
-    import uvicorn, os
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+        import os
+        import uvicorn
 
-
-
-
-
-
-
-
+        uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8080)),
+    )

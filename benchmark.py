@@ -1,8 +1,11 @@
 #!/usr/bin/env python
 """Performance benchmark comparing old vs optimized parser."""
 import time
-from ai_parser import local_parse as old_parse, smart_parse as old_smart
-from ai_parser_optimized import local_parse as new_parse, smart_parse as new_smart
+
+from ai_parser import local_parse as old_parse
+from ai_parser import smart_parse as old_smart
+from ai_parser_optimized import local_parse as new_parse
+from ai_parser_optimized import smart_parse as new_smart
 
 TEST_CASES = [
     "jeg skal have den der sødmælk",
@@ -13,6 +16,7 @@ TEST_CASES = [
     "mælk mælk mælk",
 ] * 100  # 600 total parses
 
+
 def benchmark(name: str, func, *args):
     start = time.perf_counter()
     for text in TEST_CASES:
@@ -22,7 +26,8 @@ def benchmark(name: str, func, *args):
     print(f"{name:20} {elapsed:.3f}s  ({ops_per_sec:.0f} ops/s)")
     return elapsed
 
-print("🚀 Performance Benchmark\n" + "="*50)
+
+print("🚀 Performance Benchmark\n" + "=" * 50)
 old_time = benchmark("Old local_parse", old_parse)
 new_time = benchmark("New local_parse", new_parse)
 speedup = old_time / new_time
