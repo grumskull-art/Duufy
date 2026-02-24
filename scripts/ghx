@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Run GitHub CLI using the token already stored in git credential manager.
+cred="$(
+  printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null || true
+)"
+token="$(printf '%s\n' "$cred" | sed -n 's/^password=//p' | head -n1)"
+
+if [ -z "${token}" ]; then
+  echo "No GitHub token found in git credentials for github.com." >&2
+  echo "Run: gh auth login (or configure git credentials) and try again." >&2
+  exit 1
+fi
+
+export GH_TOKEN="${token}"
+exec gh "$@"

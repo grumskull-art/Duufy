@@ -1,4 +1,11 @@
+import asyncio
+import os
+import time
+import traceback
 from contextlib import asynccontextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -12,36 +19,37 @@ from analytics import get_full_analytics, log_error, track_event
 from analytics import track_user_activity as analytics_track_user_activity
 from analytics import track_user_churn as analytics_track_user_churn
 from analytics import track_user_signup as analytics_track_user_signup
-from api import auth, groups, invites, items
-from api.auth import verify_token
-from api.utils import UTF8JSONResponse
-from database import ensure_data_files
+from auth import verify_token
+import database
 from supabase_client import (SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY,
-                               SUPABASE_URL, check_connection,
-                               shutdown_client, startup_client)
+                             SUPABASE_URL, check_connection,
+                             shutdown_client, startup_client)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # On startup
-    # Validate essential environment variables
-    if not all([SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY]):
-        raise RuntimeError(
-            "Supabase environment variables (URL, ANON_KEY, SERVICE_KEY) must be set."
-        )
-    
-    await startup_client()
-    await ensure_data_files()
+    # Always prepare local JSON data files for dev/runtime safety.
+    await database.ensure_data_files()
+
+    # Supabase is optional in local/dev environments.
+    app.state.supabase_enabled = all(
+        [SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY]
+    )
+    if app.state.supabase_enabled:
+        await startup_client()
+    else:
+        print("WARN: Supabase env vars mangler, kører i lokal/dev mode.")
+
     yield
-    # On shutdown
-    await shutdown_client()
+    if app.state.supabase_enabled:
+        await shutdown_client()
 
 
 app = FastAPI(
     title="Duufy API",
     description="Do you often forget? Duufy don't - AI-powered shopping list",
     version="1.0.0",
-    default_response_class=UTF8JSONResponse,
+    default_response_class=JSONResponse,
     lifespan=lifespan,
 )
 
@@ -51,7 +59,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     """Always return JSON for unhandled errors (prod-safe)."""
     # NOTE: Detailed stack traces are logged by middleware/uvicorn; do not
     # leak internals to clients.
-    return UTF8JSONResponse(
+    return JSONResponse(
         status_code=500,
         content={
             "error": {
@@ -88,7 +96,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         message = exc.detail if isinstance(
             exc.detail, str) else "Request failed"
 
-    return UTF8JSONResponse(
+    return JSONResponse(
         status_code=exc.status_code,
         content={"error": {"code": code, "message": message}},
     )
@@ -192,8 +200,16 @@ app.add_middleware(
 @app.get("/")
 async def read_root():
     """Returner HTML-siden"""
+    index_path = Path(__file__).parent / "index.html"
+    if not index_path.exists():
+        index_path = Path(__file__).parent / "app.html"
+    if not index_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Frontend file not found"},
+        )
     return FileResponse(
-        Path(__file__).parent / "index.html",
+        index_path,
         headers={"Cache-Control": "public, max-age=86400"},
     )
 
@@ -223,6 +239,18 @@ async def get_service_worker():
 @app.get("/health")
 async def health_check():
     """Perform a live health check of the service and its dependencies."""
+    if not getattr(app.state, "supabase_enabled", False):
+        return {
+            "status": "degraded",
+            "services": {
+                "database": {
+                    "status": "disabled",
+                    "details": "Supabase not configured in environment",
+                }
+            },
+            "time": datetime.utcnow().isoformat(),
+        }
+
     # Check Supabase connection
     supabase_status = check_connection()
     if not supabase_status.get("success"):
@@ -301,6 +329,55 @@ async def parse_voice_input(request: ParseRequest, _: dict = Depends(verify_toke
     result["items"] = unique_items
 
     return result
+
+
+async def _maybe_await(value: Any) -> Any:
+    if asyncio.iscoroutine(value):
+        return await value
+    return value
+
+
+@app.patch("/items/{item_id}")
+async def patch_item(item_id: str, payload: dict = Body(...)):
+    updates = {k: v for k, v in payload.items() if k in {"name", "quantity"}}
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "EMPTY_PATCH",
+                    "message": "No updatable fields provided",
+                }
+            },
+        )
+
+    items = await _maybe_await(database.load_items())
+    active_group_ids = await _maybe_await(database.get_active_groups())
+    active_group_ids = set(active_group_ids or [])
+
+    for item in items:
+        if item.get("id") != item_id:
+            continue
+        if item.get("group_id") not in active_group_ids:
+            break
+
+        if "name" in updates:
+            item["name"] = str(updates["name"]).strip()
+        if "quantity" in updates:
+            item["quantity"] = str(updates["quantity"]).strip()
+
+        await _maybe_await(database.save_items(items))
+        return {"item": item}
+
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "code": "ITEM_NOT_FOUND",
+                "message": "Item not found in active groups",
+            }
+        },
+    )
 
 # ========== SIGNUP / ONBOARDING ENDPOINT ==========
 
@@ -845,11 +922,10 @@ async def validate_parse_result(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
-    if __name__ == "__main__":
-        import os
-        import uvicorn
+if __name__ == "__main__":
+    import uvicorn
 
-        uvicorn.run(
+    uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", 8080)),

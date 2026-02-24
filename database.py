@@ -91,7 +91,7 @@ async def ensure_data_files() -> None:
             await safe_write_json(file_path, [])
 
 
-async def safe_read_json(filepath: Path, default: Any = None) -> Any:
+async def _safe_read_json_async(filepath: Path, default: Any = None) -> Any:
     """Thread-safe JSON file reading with file locking"""
     if not filepath.exists():
         return default if default is not None else {}
@@ -125,7 +125,7 @@ async def safe_read_json(filepath: Path, default: Any = None) -> Any:
         await asyncio.to_thread(lock.release)
 
 
-async def safe_write_json(filepath: Path, data: Any) -> None:
+async def _safe_write_json_async(filepath: Path, data: Any) -> None:
     """Thread-safe JSON file writing with file locking"""
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
@@ -156,7 +156,7 @@ async def safe_write_json(filepath: Path, data: Any) -> None:
             async with aiofiles.open(temp_file, "w", encoding="utf-8") as f:
                 await f.write(payload)
                 await f.flush()
-                fileno = await f.fileno()
+                fileno = f.fileno()
                 await asyncio.to_thread(os.fsync, fileno)
             await asyncio.to_thread(os.replace, temp_file, filepath)
         except OSError as exc:
@@ -169,6 +169,34 @@ async def safe_write_json(filepath: Path, data: Any) -> None:
             raise
     finally:
         await asyncio.to_thread(lock.release)
+
+
+def safe_read_json(filepath: Path, default: Any = None) -> Any:
+    """
+    Read JSON with dual sync/async compatibility.
+
+    - In async contexts: returns a coroutine (must be awaited).
+    - In sync contexts: executes immediately and returns the value.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_safe_read_json_async(filepath, default))
+    return _safe_read_json_async(filepath, default)
+
+
+def safe_write_json(filepath: Path, data: Any):
+    """
+    Write JSON with dual sync/async compatibility.
+
+    - In async contexts: returns a coroutine (must be awaited).
+    - In sync contexts: executes immediately.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_safe_write_json_async(filepath, data))
+    return _safe_write_json_async(filepath, data)
 
 
 async def load_items() -> List[Dict[str, Any]]:
