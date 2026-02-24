@@ -229,6 +229,28 @@ async def get_manifest():
     )
 
 
+@app.get("/icon-192.png")
+async def get_icon_192():
+    icon_path = Path(__file__).parent / "icon-192.png"
+    if not icon_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Icon file not found"},
+        )
+    return FileResponse(icon_path, headers={"Cache-Control": "public, max-age=86400"})
+
+
+@app.get("/icon-512.png")
+async def get_icon_512():
+    icon_path = Path(__file__).parent / "icon-512.png"
+    if not icon_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "NOT_FOUND", "message": "Icon file not found"},
+        )
+    return FileResponse(icon_path, headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/sw.js")
 async def get_service_worker():
     """Service Worker"""

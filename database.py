@@ -31,11 +31,11 @@ from dotenv import load_dotenv
 env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".env"))
 load_dotenv(env_path)
 
-# Bekræft miljøet (kan slettes efter test)
-if not os.getenv("SUPABASE_URL"):
-    print("WARN: .env ikke fundet af Codex! Korer fallback...")
+# Miljøstatus (informativ): Supabase er valgfri i lokal/dev mode.
+if os.getenv("SUPABASE_URL"):
+    print("OK: Supabase konfiguration indlæst.")
 else:
-    print("OK: Miljovariabler indlaest korrekt.")
+    print("INFO: SUPABASE_URL ikke sat. Kører lokal/dev mode.")
 
 
 logger = logging.getLogger(__name__)

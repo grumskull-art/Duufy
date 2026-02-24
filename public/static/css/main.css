@@ -1,0 +1,11 @@
+#offline-banner {
+    position: fixed;
+    top: 0;
+    width: 100%;
+    background: #ff5959;
+    color: white;
+    text-align: center;
+    padding: 8px;
+    font-weight: bold;
+    z-index: 9999;
+}
