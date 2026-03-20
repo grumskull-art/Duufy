@@ -7,6 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Duufy">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <title>Duufy - Smart Indkøbsliste</title>
@@ -636,6 +637,7 @@
         function showApp() {
             document.getElementById('authScreen').style.display = 'none';
             document.getElementById('appContainer').classList.add('active');
+            initRealtime();
         }
         
         function showAuth() {
@@ -647,6 +649,7 @@
             localStorage.removeItem('duufy_token');
             accessToken = null;
             currentUser = null;
+            stopRealtime();
             showAuth();
             showToast('👋 Du er logget ud');
         }
@@ -876,6 +879,40 @@
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/sw.js').catch(() => {});
         }
+
+        // Supabase Realtime - live sync between users
+        let realtimeChannel = null;
+
+        async function initRealtime() {
+            if (realtimeChannel) return;
+            try {
+                const configRes = await fetch(API_BASE + '/config');
+                const config = await configRes.json();
+                if (!config.supabase_url || !config.supabase_anon_key) return;
+
+                const sb = supabase.createClient(config.supabase_url, config.supabase_anon_key);
+                realtimeChannel = sb.channel('items-changes')
+                    .on('postgres_changes',
+                        { event: '*', schema: 'public', table: 'items' },
+                        (payload) => {
+                            console.log('Realtime update:', payload.eventType);
+                            loadItems();
+                        }
+                    )
+                    .subscribe((status) => {
+                        console.log('Realtime status:', status);
+                    });
+            } catch (err) {
+                console.error('Realtime init failed:', err);
+            }
+        }
+
+        function stopRealtime() {
+            if (realtimeChannel) {
+                realtimeChannel.unsubscribe();
+                realtimeChannel = null;
+            }
+        }
     </script>
 </body>
-                    body: JSON.stringify({
+</html>

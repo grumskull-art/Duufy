@@ -24,7 +24,9 @@ from auth import verify_token
 import database
 from supabase_client import (SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY,
                              SUPABASE_URL, check_connection,
-                             shutdown_client, startup_client)
+                             get_user_async, shutdown_client,
+                             sign_in_async, sign_up_async,
+                             startup_client)
 
 
 @asynccontextmanager
@@ -311,6 +313,75 @@ async def health_check():
 async def get_version():
     return {"version": "v1.1", "status": "ok"}
 
+
+@app.get("/config")
+async def get_config():
+    """Return public Supabase config for frontend Realtime client."""
+    return {
+        "supabase_url": SUPABASE_URL or "",
+        "supabase_anon_key": SUPABASE_ANON_KEY or "",
+    }
+
+
+# ========== AUTH ENDPOINTS ==========
+
+
+class SignUpRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class SignInRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/signup")
+async def auth_signup(req: SignUpRequest):
+    metadata = {"name": req.name} if req.name else None
+    result = await sign_up_async(req.email, req.password, metadata)
+    if result.get("success"):
+        return {"success": True}
+    return JSONResponse(
+        status_code=400,
+        content={"success": False, "error": result.get("error", "Signup failed")},
+    )
+
+
+@app.post("/auth/signin")
+async def auth_signin(req: SignInRequest):
+    result = await sign_in_async(req.email, req.password)
+    if result.get("success"):
+        return {
+            "success": True,
+            "access_token": result["access_token"],
+            "user": result.get("user"),
+        }
+    return JSONResponse(
+        status_code=401,
+        content={"success": False, "error": result.get("error", "Login failed")},
+    )
+
+
+@app.get("/auth/me")
+async def auth_me(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return JSONResponse(
+            status_code=401,
+            content={"success": False, "error": "No token"},
+        )
+    token = auth_header[7:]
+    result = await get_user_async(token)
+    if result.get("success"):
+        return {"success": True, "user": result["user"]}
+    return JSONResponse(
+        status_code=401,
+        content={"success": False, "error": "Invalid token"},
+    )
+
+
 # AI Parser endpoint
 
 
@@ -396,6 +467,76 @@ async def patch_item(item_id: str, payload: dict = Body(...)):
             }
         },
     )
+
+
+# ========== ITEM CRUD ENDPOINTS ==========
+
+
+class AddItemRequest(BaseModel):
+    item: str
+    quantity: Optional[str] = None
+    unit: Optional[str] = None
+    category: Optional[str] = None
+
+
+class ToggleItemRequest(BaseModel):
+    name: str
+
+
+@app.get("/items")
+async def list_items():
+    """Get all items across active groups."""
+    group_ids = await database.get_active_groups()
+    all_items = []
+    for gid in group_ids:
+        items = await database.get_group_items(gid)
+        all_items.extend(items)
+    # Return flat array matching frontend expectations
+    return [
+        {
+            "name": item.get("name", ""),
+            "quantity": item.get("quantity", ""),
+            "unit": item.get("unit", ""),
+            "checked": item.get("checked", False),
+            "image_url": item.get("image_url"),
+        }
+        for item in all_items
+    ]
+
+
+@app.post("/items")
+async def add_item(req: AddItemRequest):
+    """Add an item to active groups."""
+    item_data = {
+        "name": req.item.strip(),
+        "quantity": req.quantity or "",
+        "unit": req.unit,
+        "category": req.category,
+    }
+    result = await database.add_item_to_groups(item_data)
+    if result:
+        return {"success": True}
+    return JSONResponse(
+        status_code=500,
+        content={"success": False, "error": "Failed to add item"},
+    )
+
+
+@app.post("/items/toggle")
+async def toggle_item(req: ToggleItemRequest):
+    """Toggle checked state for an item by name."""
+    toggled = await database.toggle_item_by_name(req.name)
+    return {"success": toggled}
+
+
+@app.delete("/items/{item_name}")
+async def delete_item_by_name(item_name: str):
+    """Delete an item by name from all active groups."""
+    group_ids = await database.get_active_groups()
+    for gid in group_ids:
+        await database.delete_item_from_group(gid, item_name)
+    return {"success": True}
+
 
 # ========== SIGNUP / ONBOARDING ENDPOINT ==========
 

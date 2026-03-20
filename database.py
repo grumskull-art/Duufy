@@ -911,6 +911,43 @@ async def patch_item(
     return None
 
 
+async def toggle_item_by_name(item_name: str) -> bool:
+    """Toggle checked state for an item by name across active groups."""
+    backend = _get_backend()
+    active_groups = await get_active_groups()
+
+    if backend == "supabase":
+        from supabase_client import db_request_async, db_select_async
+
+        for gid in active_groups:
+            result = await db_select_async(
+                "items", "*",
+                filters={"group_id": gid, "name": item_name},
+                use_service_key=True,
+            )
+            if result.get("success") and result.get("data"):
+                item = result["data"][0]
+                new_checked = not item.get("checked", False)
+                await db_request_async(
+                    "PATCH", "items",
+                    query_params=f"group_id=eq.{gid}&name=eq.{item_name}",
+                    body={"checked": new_checked, "updated_at": _now_iso()},
+                    use_service_key=True,
+                )
+                return True
+        return False
+
+    # JSON backend
+    items = await load_items()
+    active_set = set(active_groups)
+    for item in items:
+        if item.get("name") == item_name and item.get("group_id") in active_set:
+            item["checked"] = not item.get("checked", False)
+            await save_items(items)
+            return True
+    return False
+
+
 # Supabase placeholders
 
 
