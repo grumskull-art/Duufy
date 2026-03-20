@@ -612,8 +612,9 @@ class SupabaseGroupStore:
             rows = result["data"]
             if isinstance(rows, list) and rows:
                 return rows[0]["id"]
-        # Fallback: generate an id locally (should not happen with Prefer: return=representation)
-        return uuid4().hex
+        raise RuntimeError(
+            f"Failed to create group in Supabase: {result.get('error', 'no data returned')}"
+        )
 
     async def get_groups(self) -> List[Dict[str, Any]]:
         result = await self._select("groups", "*", use_service_key=True)
@@ -705,8 +706,9 @@ class SupabaseGroupStore:
             return False
 
         ts = _now_iso()
+        all_ok = True
         for gid in targets:
-            await self._insert("items", {
+            result = await self._insert("items", {
                 "group_id": gid,
                 "name": item_data.get("name", ""),
                 "quantity": str(item_data.get("quantity", "")),
@@ -717,7 +719,10 @@ class SupabaseGroupStore:
                 "created_at": ts,
                 "updated_at": ts,
             }, use_service_key=True)
-        return True
+            if not result.get("success"):
+                logger.warning("Failed to insert item into group %s: %s", gid, result.get("error"))
+                all_ok = False
+        return all_ok
 
     async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
         result = await self._select(
@@ -856,11 +861,25 @@ async def patch_item(
     backend = _get_backend()
 
     if backend == "supabase":
-        from supabase_client import db_request_async, db_update_async
+        from supabase_client import db_request_async, db_select_async
+
+        # Enforce active group scope: fetch item first, check its group
+        active_group_ids = set(await get_active_groups() or [])
+        item_result = await db_select_async(
+            "items", "*", filters={"id": item_id}, use_service_key=True
+        )
+        if not item_result.get("success") or not item_result.get("data"):
+            return None
+        item = item_result["data"][0]
+        if item.get("group_id") not in active_group_ids:
+            return None
 
         updates["updated_at"] = _now_iso()
-        result = await db_update_async(
-            "items", updates, "id", item_id, use_service_key=True
+        result = await db_request_async(
+            "PATCH", "items",
+            query_params=f"id=eq.{item_id}",
+            body=updates,
+            use_service_key=True,
         )
         if result.get("success") and result.get("data"):
             rows = result["data"]

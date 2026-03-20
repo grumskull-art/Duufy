@@ -1037,18 +1037,9 @@ if __name__ == "__main__":
     for phrase in test_phrases:
         result = smart_parse(phrase, force_ai=False)
         print(f"\n📝 '{phrase}'")
-        print(
-            f"   Metode: {
-                result['method']} | Tillid: {
-                result['confidence']}"
-        )
+        print(f"   Metode: {result['method']} | Tillid: {result['confidence']}")
         if result["items"]:
             for item in result["items"]:
-                print(
-                    f"   ✓ {
-                        item['item']}: {
-                        item['quantity']} ({
-                        item['category']})"
-                )
+                print(f"   ✓ {item['item']}: {item['quantity']} ({item['category']})")
         else:
             print("   ✗ Ingen varer fundet")
