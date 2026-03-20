@@ -5,6 +5,8 @@ import main
 
 
 def _client_with_data(monkeypatch, tmp_path, items, active_groups):
+    monkeypatch.setenv("DUUFY_STORAGE", "json")
+    monkeypatch.setattr(database, "_STORE", None)
     items_path = tmp_path / "items.json"
     monkeypatch.setattr(database, "_ITEMS_FILE_DEFAULT", items_path)
     monkeypatch.setattr(

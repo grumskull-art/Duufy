@@ -15,9 +15,9 @@ async def verify_token(authorization: str = Header(None)):
             detail={"error": {"code": "UNAUTHORIZED", "message": "Invalid token"}},
         )
 
-    from supabase_client import get_user
+    from supabase_client import get_user_async
 
-    result = get_user(token)
+    result = await get_user_async(token)
     if not result.get("success"):
         raise HTTPException(
             status_code=401,

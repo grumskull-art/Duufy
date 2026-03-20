@@ -230,7 +230,7 @@ def _get_backend() -> str:
       - USE_LOCAL_JSON=true/false
     """
     backend = os.getenv("DUUFY_STORAGE", "").strip().lower()
-    if backend in {"json", "firestore"}:
+    if backend in {"json", "firestore", "supabase"}:
         return backend
 
     # Backwards compatibility: default to json unless explicitly disabled
@@ -561,6 +561,206 @@ class FirestoreGroupStore:
 
 
 # ----------------------------
+# Supabase implementation (lazy import)
+# ----------------------------
+
+
+class SupabaseGroupStore:
+    """Supabase PostgreSQL backend via httpx REST API.
+
+    Uses the async CRUD helpers from supabase_client.py.
+    Requires SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY in env.
+    """
+
+    def __init__(self) -> None:
+        # Lazy import to avoid hard dependency when not selected
+        from supabase_client import (
+            db_insert_async,
+            db_delete_async,
+            db_request_async,
+            db_select_async,
+            db_update_async,
+        )
+        self._insert = db_insert_async
+        self._select = db_select_async
+        self._update = db_update_async
+        self._delete = db_delete_async
+        self._request = db_request_async
+
+    @staticmethod
+    def _to_uuid_or_none(value: str) -> Optional[str]:
+        """Return value if it looks like a UUID, else None."""
+        if not value:
+            return None
+        try:
+            from uuid import UUID
+            UUID(value)
+            return value
+        except (ValueError, AttributeError):
+            return None
+
+    async def create_group(self, group_name: str, owner_id: str) -> str:
+        ts = _now_iso()
+        result = await self._insert("groups", {
+            "name": group_name.strip(),
+            "owner_id": self._to_uuid_or_none(owner_id),
+            "created_at": ts,
+            "updated_at": ts,
+        }, use_service_key=True)
+
+        if result.get("success") and result.get("data"):
+            rows = result["data"]
+            if isinstance(rows, list) and rows:
+                return rows[0]["id"]
+        # Fallback: generate an id locally (should not happen with Prefer: return=representation)
+        return uuid4().hex
+
+    async def get_groups(self) -> List[Dict[str, Any]]:
+        result = await self._select("groups", "*", use_service_key=True)
+        if not result.get("success"):
+            logger.warning("Failed to fetch groups from Supabase: %s", result.get("error"))
+            return []
+
+        groups = []
+        for g in result.get("data", []):
+            # Count items per group
+            items_result = await self._select(
+                "items", "id", filters={"group_id": g["id"]}, use_service_key=True
+            )
+            item_count = len(items_result.get("data", [])) if items_result.get("success") else 0
+
+            # Count members per group
+            members_result = await self._select(
+                "group_members", "id", filters={"group_id": g["id"]}, use_service_key=True
+            )
+            member_count = len(members_result.get("data", [])) if members_result.get("success") else 0
+
+            groups.append({
+                "id": g["id"],
+                "name": g.get("name", ""),
+                "member_count": member_count,
+                "item_count": item_count,
+            })
+        return groups
+
+    async def add_member_to_group(self, group_id: str, member_name: str) -> bool:
+        # Check if already a member
+        existing = await self._select(
+            "group_members", "id",
+            filters={"group_id": group_id, "user_id": member_name},
+            use_service_key=True,
+        )
+        if existing.get("success") and existing.get("data"):
+            return False
+
+        result = await self._insert("group_members", {
+            "group_id": group_id,
+            "user_id": member_name,
+            "role": "member",
+        }, use_service_key=True)
+        return result.get("success", False)
+
+    async def get_group_members(self, group_id: str) -> List[str]:
+        result = await self._select(
+            "group_members", "user_id",
+            filters={"group_id": group_id},
+            use_service_key=True,
+        )
+        if not result.get("success"):
+            return []
+        return [row["user_id"] for row in result.get("data", [])]
+
+    async def get_group_owner(self, group_id: str) -> Optional[str]:
+        result = await self._select(
+            "groups", "owner_id",
+            filters={"id": group_id},
+            use_service_key=True,
+        )
+        if result.get("success") and result.get("data"):
+            return result["data"][0].get("owner_id")
+        return None
+
+    async def set_active_groups(self, group_ids: List[str]) -> bool:
+        if len(group_ids) > 3:
+            return False
+        # Store active groups in local JSON for now (per-device setting)
+        await _safe_write_json_async(
+            _DATA_DIR_DEFAULT / "active_groups.json", list(group_ids)
+        )
+        return True
+
+    async def get_active_groups(self) -> List[str]:
+        data = await _safe_read_json_async(
+            _DATA_DIR_DEFAULT / "active_groups.json", []
+        )
+        if isinstance(data, list):
+            return data
+        return []
+
+    async def add_item_to_groups(
+        self, item_data: Dict[str, Any], group_ids: Optional[List[str]]
+    ) -> bool:
+        targets = group_ids or await self.get_active_groups()
+        if not targets:
+            return False
+
+        ts = _now_iso()
+        for gid in targets:
+            await self._insert("items", {
+                "group_id": gid,
+                "name": item_data.get("name", ""),
+                "quantity": str(item_data.get("quantity", "")),
+                "unit": item_data.get("unit"),
+                "category": item_data.get("category"),
+                "checked": False,
+                "added_by": item_data.get("added_by"),
+                "created_at": ts,
+                "updated_at": ts,
+            }, use_service_key=True)
+        return True
+
+    async def get_group_items(self, group_id: str) -> List[Dict[str, Any]]:
+        result = await self._select(
+            "items", "*",
+            filters={"group_id": group_id},
+            use_service_key=True,
+        )
+        if not result.get("success"):
+            return []
+        return result.get("data", [])
+
+    async def delete_item_from_group(self, group_id: str, item_name: str) -> None:
+        await self._request(
+            "DELETE", "items",
+            query_params=f"group_id=eq.{group_id}&name=eq.{item_name}",
+            use_service_key=True,
+        )
+
+    async def remove_member_from_group(self, group_id: str, member_name: str) -> bool:
+        result = await self._request(
+            "DELETE", "group_members",
+            query_params=f"group_id=eq.{group_id}&user_id=eq.{member_name}",
+            use_service_key=True,
+        )
+        return result.get("success", False)
+
+    async def delete_group(self, group_id: str) -> bool:
+        result = await self._delete("groups", "id", group_id, use_service_key=True)
+        return result.get("success", False)
+
+    async def update_item_quantity(
+        self, group_id: str, item_name: str, new_quantity: str
+    ) -> bool:
+        result = await self._request(
+            "PATCH", "items",
+            query_params=f"group_id=eq.{group_id}&name=eq.{item_name}",
+            body={"quantity": new_quantity, "updated_at": _now_iso()},
+            use_service_key=True,
+        )
+        return result.get("success", False)
+
+
+# ----------------------------
 # Store factory / singleton
 # ----------------------------
 
@@ -574,7 +774,9 @@ def _store() -> GroupStore:
         return _STORE
 
     backend = _get_backend()
-    if backend == "firestore":
+    if backend == "supabase":
+        _STORE = SupabaseGroupStore()
+    elif backend == "firestore":
         _STORE = FirestoreGroupStore()
     else:
         _STORE = JsonGroupStore(json_file=_JSON_FILE_DEFAULT)
@@ -640,6 +842,54 @@ async def update_item_quantity(
     group_id: str, item_name: str, new_quantity: str
 ) -> bool:
     return await _store().update_item_quantity(group_id, item_name, new_quantity)
+
+
+# ----------------------------
+# Item patch helper (backend-aware)
+# ----------------------------
+
+
+async def patch_item(
+    item_id: str, updates: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """Patch an item by ID. Returns the updated item or None if not found."""
+    backend = _get_backend()
+
+    if backend == "supabase":
+        from supabase_client import db_request_async, db_update_async
+
+        updates["updated_at"] = _now_iso()
+        result = await db_update_async(
+            "items", updates, "id", item_id, use_service_key=True
+        )
+        if result.get("success") and result.get("data"):
+            rows = result["data"]
+            if isinstance(rows, list) and rows:
+                return rows[0]
+        return None
+
+    # JSON backend: load all items, find by id, mutate, save
+    items = await load_items()
+    active_result = get_active_groups()
+    if asyncio.iscoroutine(active_result):
+        active_result = await active_result
+    active_group_ids = set(active_result or [])
+
+    for item in items:
+        if item.get("id") != item_id:
+            continue
+        if item.get("group_id") not in active_group_ids:
+            break
+
+        if "name" in updates:
+            item["name"] = str(updates["name"]).strip()
+        if "quantity" in updates:
+            item["quantity"] = str(updates["quantity"]).strip()
+
+        await save_items(items)
+        return item
+
+    return None
 
 
 # Supabase placeholders

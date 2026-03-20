@@ -5,6 +5,7 @@ import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from html import escape
 from typing import Any, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
@@ -35,6 +36,15 @@ async def lifespan(app: FastAPI):
     app.state.supabase_enabled = all(
         [SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY]
     )
+
+    # Fail fast if supabase backend selected but env vars missing
+    storage_backend = os.getenv("DUUFY_STORAGE", "").strip().lower()
+    if storage_backend == "supabase" and not app.state.supabase_enabled:
+        raise RuntimeError(
+            "DUUFY_STORAGE=supabase requires SUPABASE_URL, SUPABASE_ANON_KEY, "
+            "and SUPABASE_SERVICE_ROLE_KEY to be set in environment."
+        )
+
     if app.state.supabase_enabled:
         await startup_client()
     else:
@@ -273,8 +283,8 @@ async def health_check():
             "time": datetime.utcnow().isoformat(),
         }
 
-    # Check Supabase connection
-    supabase_status = check_connection()
+    # Check Supabase connection (run sync function in thread to avoid blocking)
+    supabase_status = await asyncio.to_thread(check_connection)
     if not supabase_status.get("success"):
         raise HTTPException(
             status_code=503,
@@ -373,23 +383,9 @@ async def patch_item(item_id: str, payload: dict = Body(...)):
             },
         )
 
-    items = await _maybe_await(database.load_items())
-    active_group_ids = await _maybe_await(database.get_active_groups())
-    active_group_ids = set(active_group_ids or [])
-
-    for item in items:
-        if item.get("id") != item_id:
-            continue
-        if item.get("group_id") not in active_group_ids:
-            break
-
-        if "name" in updates:
-            item["name"] = str(updates["name"]).strip()
-        if "quantity" in updates:
-            item["quantity"] = str(updates["quantity"]).strip()
-
-        await _maybe_await(database.save_items(items))
-        return {"item": item}
+    result = await database.patch_item(item_id, updates)
+    if result is not None:
+        return {"item": result}
 
     raise HTTPException(
         status_code=404,
@@ -663,7 +659,7 @@ async def track_user_churn(
         return {"success": False, "error": str(e)}
 
 
-@app.get("/admin/analytics")
+@app.get("/admin/analytics", dependencies=[Depends(verify_token)])
 async def get_analytics_dashboard():
     """Get complete analytics dashboard (ADMIN ONLY)"""
     try:
@@ -804,7 +800,7 @@ async def get_analytics_dashboard():
                     <span class="stat-label">Total Events</span>
                     <span class="stat-value">{data['events_7days']['total_events']}</span>
                 </div>
-                {"".join(f'<div class="stat-row"><span class="stat-label">{event}</span><span class="stat-value">{count}</span></div>'
+                {"".join(f'<div class="stat-row"><span class="stat-label">{escape(str(event))}</span><span class="stat-value">{escape(str(count))}</span></div>'
                          for event, count in data['events_7days']['events_by_type'].items())}
             </div>
             
@@ -814,14 +810,14 @@ async def get_analytics_dashboard():
                     <span class="stat-label">Total Errors</span>
                     <span class="stat-value">{data['errors_7days']['total_errors']}</span>
                 </div>
-                {"".join(f'<div class="stat-row"><span class="stat-label">{error_type}</span><span class="stat-value">{count}</span></div>'
+                {"".join(f'<div class="stat-row"><span class="stat-label">{escape(str(error_type))}</span><span class="stat-value">{escape(str(count))}</span></div>'
                              for error_type, count in data['errors_7days']['errors_by_type'].items())}
                 
                 <h3 style="margin-top: 30px; margin-bottom: 15px; color: #666; font-size: 16px;">Recent Errors:</h3>
                 {"".join(f'''<div class="error-item">
-                    <div class="error-type">{error['type']}</div>
-                    <div class="error-message">{error['message']}</div>
-                    <div class="error-time">{error['timestamp'][:19].replace('T', ' ')}</div>
+                    <div class="error-type">{escape(str(error['type']))}</div>
+                    <div class="error-message">{escape(str(error['message']))}</div>
+                    <div class="error-time">{escape(str(error['timestamp'][:19].replace('T', ' ')))}</div>
                 </div>''' for error in data['errors_7days']['recent_errors'])}
             </div>
             
@@ -837,7 +833,7 @@ async def get_analytics_dashboard():
                 </div>
                 
                 <h3 style="margin-top: 30px; margin-bottom: 15px; color: #666; font-size: 16px;">Churn Reasons:</h3>
-                {"".join(f'<div class="stat-row"><span class="stat-label">{reason}</span><span class="stat-value">{count}</span></div>'
+                {"".join(f'<div class="stat-row"><span class="stat-label">{escape(str(reason))}</span><span class="stat-value">{escape(str(count))}</span></div>'
                                  for reason, count in data['churn_analysis']['churn_reasons'].items())}
             </div>
 
@@ -853,7 +849,7 @@ async def get_analytics_dashboard():
         return {"error": str(e)}
 
 
-@app.get("/admin/analytics/json")
+@app.get("/admin/analytics/json", dependencies=[Depends(verify_token)])
 async def get_analytics_json():
     """Get analytics data as JSON (ADMIN ONLY)"""
     return get_full_analytics()
