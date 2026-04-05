@@ -248,8 +248,15 @@ STOP_PREFIXES_DA = [
     "vi skal",
     "jeg vil",
     "vi vil",
+    "jeg skal bruge",
+    "vi skal bruge",
+    "skal bruge",
     "skal have",
     "vil have",
+    "jeg vil gerne have",
+    "vi vil gerne have",
+    "vil gerne have",
+    "gerne have",
     "køb",
     "hent",
     "find",
@@ -275,6 +282,18 @@ STOP_TOKENS = {
     "skriv",
     "hos",
     "fra",
+    "bruge",
+    "have",
+    "gerne",
+    "mangle",
+    "mangler",
+    "altså",
+    "eh",
+    "øh",
+    "øhm",
+    "ehm",
+    "noget",
+    "lidt",
     "please",
 }
 
@@ -289,6 +308,33 @@ def _normalize_item_text(value: str) -> str:
         return ""
     text = re.sub(r"\b(\w+)(\s+\1\b)+", r"\1", text)
     return text
+
+
+def _strip_leading_fillers(text: str) -> str:
+    if not text:
+        return ""
+
+    fillers = [
+        r"^(øh|ehm|øhm|eh|altså|nå|nåh|ikke|jo|bare)\s+",
+        r"^(jeg skal bruge|vi skal bruge|skal bruge)\s+",
+        r"^(jeg skal have|vi skal have|skal have)\s+",
+        r"^(jeg vil gerne have|vi vil gerne have|vil gerne have)\s+",
+        r"^(jeg skal|vi skal|jeg vil|vi vil)\s+",
+        r"^(vi mangler|mangler)\s+",
+        r"^(tilføj|køb|hent|find|skriv)\s+",
+        r"^(noget|lidt)\s+",
+        r"^(af det der|det der|den der)\s+",
+    ]
+
+    cleaned = text.strip()
+    for _ in range(4):
+        original = cleaned
+        for filler in fillers:
+            cleaned = re.sub(filler, "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        if cleaned == original:
+            break
+    return cleaned
 
 
 def strict_sanitize_items(items: List[str]) -> List[str]:
@@ -446,6 +492,9 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
         return []
 
     cleaned = text.lower()
+    cleaned = _strip_leading_fillers(cleaned)
+    if not cleaned:
+        return []
     cleaned = re.sub(r"(\d)([A-Za-z]+)", r"\1 \2", cleaned)
     cleaned = re.sub(r"[\.,;!]+", ",", cleaned)
     cleaned = re.sub(r"\+", " + ", cleaned)

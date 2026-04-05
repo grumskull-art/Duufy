@@ -60,6 +60,8 @@ def _headers(use_service_key: bool = False) -> dict[str, str]:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Prefer": "return=representation",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
 

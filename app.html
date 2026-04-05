@@ -194,6 +194,12 @@
             font-size: 20px;
             color: var(--text);
         }
+
+        .list-subtitle {
+            color: var(--text-light);
+            font-size: 13px;
+            margin-top: 4px;
+        }
         
         .list-count {
             background: var(--primary);
@@ -456,6 +462,113 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        .groups-sheet {
+            position: fixed;
+            inset: 0;
+            display: none;
+            z-index: 250;
+        }
+
+        .groups-sheet.active {
+            display: block;
+        }
+
+        .groups-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.35);
+        }
+
+        .groups-panel {
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--card);
+            border-radius: 24px 24px 0 0;
+            padding: 20px;
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.12);
+        }
+
+        .groups-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .groups-panel-title {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .groups-close {
+            width: 36px;
+            height: 36px;
+            border: none;
+            border-radius: 50%;
+            background: var(--bg);
+            font-size: 18px;
+            cursor: pointer;
+        }
+
+        .groups-create {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .groups-create input {
+            flex: 1;
+            padding: 14px 16px;
+            border: 2px solid var(--border);
+            border-radius: 12px;
+            font-size: 16px;
+        }
+
+        .groups-create button {
+            border: none;
+            border-radius: 12px;
+            padding: 0 16px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .groups-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-height: 45vh;
+            overflow: auto;
+        }
+
+        .group-card {
+            width: 100%;
+            border: 2px solid var(--border);
+            border-radius: 14px;
+            background: var(--card);
+            padding: 14px 16px;
+            text-align: left;
+            cursor: pointer;
+        }
+
+        .group-card.active {
+            border-color: var(--primary);
+            background: rgba(102,126,234,0.08);
+        }
+
+        .group-card-name {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .group-card-meta {
+            color: var(--text-light);
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -506,7 +619,10 @@
         
         <div class="list-container">
             <div class="list-header">
-                <h2>Min Indkøbsliste</h2>
+                <div>
+                    <h2>Min Indkøbsliste</h2>
+                    <div class="list-subtitle" id="activeGroupLabel">Ingen aktiv gruppe</div>
+                </div>
                 <span class="list-count" id="itemCount">0 varer</span>
             </div>
             
@@ -538,6 +654,21 @@
             </div>
         </nav>
     </div>
+
+    <div id="groupsSheet" class="groups-sheet">
+        <div class="groups-backdrop" onclick="closeGroupsSheet()"></div>
+        <div class="groups-panel">
+            <div class="groups-panel-header">
+                <div class="groups-panel-title">Grupper</div>
+                <button class="groups-close" onclick="closeGroupsSheet()">✕</button>
+            </div>
+            <div class="groups-create">
+                <input type="text" id="groupNameInput" placeholder="Navn på ny gruppe">
+                <button onclick="createGroup()">Opret</button>
+            </div>
+            <div id="groupsList" class="groups-list"></div>
+        </div>
+    </div>
     
     <!-- Voice Modal -->
     <div id="voiceModal" class="voice-modal">
@@ -560,6 +691,8 @@
         let currentUser = null;
         let accessToken = localStorage.getItem('duufy_token');
         let items = [];
+        let groups = [];
+        let activeGroupIds = [];
         
         // Check existing session
         if (accessToken) {
@@ -637,6 +770,7 @@
         function showApp() {
             document.getElementById('authScreen').style.display = 'none';
             document.getElementById('appContainer').classList.add('active');
+            loadGroups();
             initRealtime();
         }
         
@@ -662,6 +796,115 @@
                 renderItems();
             } catch (error) {
                 console.error('Failed to load items:', error);
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function updateActiveGroupLabel() {
+            const label = document.getElementById('activeGroupLabel');
+            const activeGroup = groups.find(group => activeGroupIds.includes(group.id));
+            label.textContent = activeGroup ? `Aktiv gruppe: ${activeGroup.name}` : 'Ingen aktiv gruppe';
+        }
+
+        function renderGroups() {
+            const container = document.getElementById('groupsList');
+            if (!groups.length) {
+                container.innerHTML = '<div class="group-card-meta">Ingen grupper endnu. Opret din første gruppe ovenfor.</div>';
+                updateActiveGroupLabel();
+                return;
+            }
+
+            container.innerHTML = groups.map(group => `
+                <button class="group-card ${activeGroupIds.includes(group.id) ? 'active' : ''}" onclick="setActiveGroup('${group.id}')">
+                    <div class="group-card-name">${escapeHtml(group.name)}</div>
+                    <div class="group-card-meta">${group.member_count} medlemmer${activeGroupIds.includes(group.id) ? ' · aktiv' : ''}</div>
+                </button>
+            `).join('');
+            updateActiveGroupLabel();
+        }
+
+        async function loadGroups() {
+            try {
+                const response = await fetch(API_BASE + '/groups');
+                const data = await response.json();
+                groups = Array.isArray(data.groups) ? data.groups : [];
+                activeGroupIds = Array.isArray(data.active_groups) ? data.active_groups : [];
+                renderGroups();
+            } catch (error) {
+                console.error('Failed to load groups:', error);
+            }
+        }
+
+        function closeGroupsSheet() {
+            document.getElementById('groupsSheet').classList.remove('active');
+        }
+
+        async function setActiveGroup(groupId) {
+            try {
+                const response = await fetch(API_BASE + '/active-groups', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify([groupId])
+                });
+                if (!response.ok) {
+                    throw new Error('Kunne ikke vælge gruppe');
+                }
+                activeGroupIds = [groupId];
+                renderGroups();
+                closeGroupsSheet();
+                await loadItems();
+                showToast('✅ Gruppe valgt');
+            } catch (error) {
+                console.error('Set active group failed:', error);
+                showToast('❌ Kunne ikke vælge gruppe');
+            }
+        }
+
+        async function createGroup() {
+            const input = document.getElementById('groupNameInput');
+            const name = input.value.trim();
+            if (!name) {
+                showToast('❌ Skriv et gruppenavn');
+                return;
+            }
+
+            const ownerId = currentUser?.id || currentUser?.email || '';
+            try {
+                const response = await fetch(API_BASE + '/groups/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, owner_id: ownerId })
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText);
+                }
+                const data = await response.json();
+                const groupId = data.group_id;
+
+                if (groupId && !groups.some(group => group.id === groupId)) {
+                    groups = [
+                        ...groups,
+                        { id: groupId, name, member_count: 0, item_count: 0 }
+                    ];
+                }
+                activeGroupIds = groupId ? [groupId] : activeGroupIds;
+                renderGroups();
+                input.value = '';
+                await loadItems();
+                closeGroupsSheet();
+                showToast(`✅ Oprettede gruppen ${name}`);
+            } catch (error) {
+                console.error('Create group failed:', error);
+                showToast('❌ Kunne ikke oprette gruppe');
             }
         }
         
@@ -812,28 +1055,47 @@
             try {
                 const response = await fetch(API_BASE + '/ai/parse', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...(accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {})
+                    },
                     body: JSON.stringify({
                         text,
                         text_alternatives: textAlternatives,
                         force_ai: false
                     })
                 });
+
+                if (response.status === 401) {
+                    localStorage.removeItem('duufy_token');
+                    accessToken = null;
+                    currentUser = null;
+                    stopRealtime();
+                    showAuth();
+                    showToast('🔒 Log ind igen for at bruge stemmeinput');
+                    return;
+                }
                 
                 const result = await response.json();
                 
                 if (result.items && result.items.length > 0) {
-                    // Add items
+                    let addedCount = 0;
+
                     for (const item of result.items) {
-                        await fetch(API_BASE + '/items', {
+                        const addResponse = await fetch(API_BASE + '/items', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(item)
                         });
+                        if (!addResponse.ok) {
+                            const errorText = await addResponse.text();
+                            throw new Error(`Add item failed: ${addResponse.status} ${errorText}`);
+                        }
+                        addedCount += 1;
                     }
                     
                     await loadItems();
-                    showToast(`✅ Tilføjede ${result.items.length} varer`);
+                    showToast(`✅ Tilføjede ${addedCount} varer`);
                 } else {
                     showToast('❌ Kunne ikke forstå input');
                 }
@@ -849,10 +1111,11 @@
             document.querySelectorAll('.nav-item')[0].classList.add('active');
         }
         
-        function showGroups() {
+        async function showGroups() {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             document.querySelectorAll('.nav-item')[1].classList.add('active');
-            showToast('👨‍👩‍👧‍👦 Grupper kommer snart!');
+            await loadGroups();
+            document.getElementById('groupsSheet').classList.add('active');
         }
         
         function showSettings() {

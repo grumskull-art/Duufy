@@ -97,7 +97,12 @@ async def _safe_read_json_async(filepath: Path, default: Any = None) -> Any:
         return default if default is not None else {}
 
     lock = await asyncio.to_thread(get_file_lock, filepath)
-    await asyncio.to_thread(lock.acquire)
+    lock_acquired = False
+    try:
+        await asyncio.to_thread(lock.acquire)
+        lock_acquired = True
+    except Exception as exc:
+        logger.warning("Falling back to unlocked read for %s: %s", filepath, exc)
     try:
         await asyncio.to_thread(_cleanup_tmp_files, filepath)
         try:
@@ -122,7 +127,8 @@ async def _safe_read_json_async(filepath: Path, default: Any = None) -> Any:
                     )
             return default if default is not None else {}
     finally:
-        await asyncio.to_thread(lock.release)
+        if lock_acquired:
+            await asyncio.to_thread(lock.release)
 
 
 async def _safe_write_json_async(filepath: Path, data: Any) -> None:
@@ -130,7 +136,12 @@ async def _safe_write_json_async(filepath: Path, data: Any) -> None:
     filepath.parent.mkdir(parents=True, exist_ok=True)
 
     lock = await asyncio.to_thread(get_file_lock, filepath)
-    await asyncio.to_thread(lock.acquire)
+    lock_acquired = False
+    try:
+        await asyncio.to_thread(lock.acquire)
+        lock_acquired = True
+    except Exception as exc:
+        logger.warning("Falling back to unlocked write for %s: %s", filepath, exc)
     try:
         await asyncio.to_thread(_cleanup_tmp_files, filepath)
         if filepath.exists():
@@ -168,7 +179,8 @@ async def _safe_write_json_async(filepath: Path, data: Any) -> None:
                 pass
             raise
     finally:
-        await asyncio.to_thread(lock.release)
+        if lock_acquired:
+            await asyncio.to_thread(lock.release)
 
 
 def safe_read_json(filepath: Path, default: Any = None) -> Any:

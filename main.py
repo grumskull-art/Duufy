@@ -15,7 +15,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                Response)
 from pydantic import BaseModel
 
-from ai_parser import smart_parse
+from ai_parser import local_parse, smart_parse
 from analytics import get_full_analytics, log_error, track_event
 from analytics import track_user_activity as analytics_track_user_activity
 from analytics import track_user_churn as analytics_track_user_churn
@@ -64,6 +64,23 @@ app = FastAPI(
     default_response_class=JSONResponse,
     lifespan=lifespan,
 )
+
+
+async def _ensure_active_group() -> list[str]:
+    active_group_ids = await database.get_active_groups()
+    if active_group_ids:
+        return active_group_ids
+
+    groups = await database.get_groups()
+    if groups:
+        first_group_id = groups[0].get("id")
+        if first_group_id:
+            await database.set_active_groups([first_group_id])
+            return [first_group_id]
+
+    default_group_id = await database.create_group("Min liste", "")
+    await database.set_active_groups([default_group_id])
+    return [default_group_id]
 
 
 @app.exception_handler(Exception)
@@ -323,6 +340,30 @@ async def get_config():
     }
 
 
+@app.get("/groups")
+async def list_groups():
+    groups = await database.get_groups()
+    active_group_ids = await database.get_active_groups()
+    return {"groups": groups, "active_groups": active_group_ids}
+
+
+@app.post("/active-groups")
+async def set_active_groups(group_ids: list[str] = Body(...)):
+    clean_ids = [group_id.strip() for group_id in group_ids if group_id and group_id.strip()]
+    ok = await database.set_active_groups(clean_ids)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_ACTIVE_GROUPS",
+                    "message": "Could not update active groups",
+                }
+            },
+        )
+    return {"success": True, "active_groups": clean_ids}
+
+
 # ========== AUTH ENDPOINTS ==========
 
 
@@ -335,6 +376,11 @@ class SignUpRequest(BaseModel):
 class SignInRequest(BaseModel):
     email: str
     password: str
+
+
+class CreateGroupRequest(BaseModel):
+    name: str
+    owner_id: Optional[str] = None
 
 
 @app.post("/auth/signup")
@@ -380,6 +426,25 @@ async def auth_me(request: Request):
         status_code=401,
         content={"success": False, "error": "Invalid token"},
     )
+
+
+@app.post("/groups/create")
+async def create_group_endpoint(req: CreateGroupRequest):
+    group_name = req.name.strip()
+    if not group_name:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_GROUP_NAME",
+                    "message": "Group name is required",
+                }
+            },
+        )
+
+    group_id = await database.create_group(group_name, req.owner_id or "")
+    await database.set_active_groups([group_id])
+    return {"success": True, "group_id": group_id}
 
 
 # AI Parser endpoint
@@ -430,6 +495,35 @@ async def parse_voice_input(request: ParseRequest, _: dict = Depends(verify_toke
             unique_items.append(item)
             seen.add(name)
     result["items"] = unique_items
+
+    if not result["items"]:
+        fallback_texts = [request.text] + (request.text_alternatives or [])
+        fallback_items = []
+        fallback_seen = set()
+
+        for text in fallback_texts:
+            for item in local_parse(text):
+                name = str(item.get("item", "")).strip()
+                if not name:
+                    continue
+                key = name.lower()
+                if key in fallback_seen:
+                    continue
+                fallback_seen.add(key)
+                fallback_items.append(
+                    {
+                        "item": key,
+                        "name": key,
+                        "quantity": str(item.get("quantity", "1")).strip() or "1",
+                        "category": item.get("category", "andet"),
+                        "warnings": [],
+                    }
+                )
+
+        if fallback_items:
+            result["items"] = fallback_items
+            result["method"] = "local_fallback"
+            result["confidence"] = "medium"
 
     return result
 
@@ -507,6 +601,7 @@ async def list_items():
 @app.post("/items")
 async def add_item(req: AddItemRequest):
     """Add an item to active groups."""
+    await _ensure_active_group()
     item_data = {
         "name": req.item.strip(),
         "quantity": req.quantity or "",
