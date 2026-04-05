@@ -207,6 +207,43 @@ STOPWORDS = {
     "ehm",
 }
 
+PARSER_FILLER_TOKENS = {
+    "jeg",
+    "vi",
+    "skal",
+    "have",
+    "vil",
+    "altså",
+    "sådan",
+    "lige",
+    "gerne",
+    "måske",
+    "noget",
+    "nogen",
+    "nogle",
+    "agtigt",
+    "typisk",
+    "bare",
+    "du",
+    "ved",
+    "der",
+    "den",
+    "det",
+    "deres",
+    "vores",
+    "her",
+    "med",
+    "så",
+    "også",
+    "okay",
+    "ok",
+    "kan",
+    "få",
+    "bruge",
+    "købe",
+    "hente",
+}
+
 NUMBER_WORDS = {
     "en": "1",
     "et": "1",
@@ -244,6 +281,10 @@ ALLOWED_MULTIWORD_ITEMS = {
 
 MAX_ITEM_TOKENS = 6
 STOP_PREFIXES_DA = [
+    "skal vi have noget",
+    "skal vi have lidt",
+    "skal vi have",
+    "skal vi",
     "jeg skal",
     "vi skal",
     "jeg vil",
@@ -316,6 +357,7 @@ def _strip_leading_fillers(text: str) -> str:
 
     fillers = [
         r"^(øh|ehm|øhm|eh|altså|nå|nåh|ikke|jo|bare)\s+",
+        r"^(skal vi have noget|skal vi have lidt|skal vi have|skal vi)\s+",
         r"^(jeg skal bruge|vi skal bruge|skal bruge)\s+",
         r"^(jeg skal have|vi skal have|skal have)\s+",
         r"^(jeg vil gerne have|vi vil gerne have|vil gerne have)\s+",
@@ -574,6 +616,8 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
             for token in name_tokens:
                 if token in STOPWORDS:
                     continue
+                if token in PARSER_FILLER_TOKENS:
+                    continue
                 if _parse_number(token):
                     continue
                 if _is_unit(token):
@@ -582,6 +626,36 @@ def deterministic_parse(text: str) -> List[Dict[str, object]]:
 
             if not filtered:
                 continue
+
+            if len(filtered) > MAX_ITEM_TOKENS:
+                canonical_candidates: List[str] = []
+                seen_candidates: set[str] = set()
+                for token in filtered:
+                    corrected = fuzzy_correct(token.lower())
+                    if corrected in CATEGORIES and corrected not in seen_candidates:
+                        seen_candidates.add(corrected)
+                        canonical_candidates.append(corrected)
+
+                if canonical_candidates:
+                    quantity = num or "1"
+                    if num and unit:
+                        quantity = f"{num} {unit}"
+
+                    for candidate in canonical_candidates:
+                        key = candidate.lower()
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        items.append(
+                            {
+                                "name": candidate,
+                                "quantity": quantity,
+                                "warnings": [],
+                            }
+                        )
+                    continue
+
+                filtered = filtered[-MAX_ITEM_TOKENS:]
 
             if (
                 not num
@@ -715,6 +789,7 @@ def local_parse(text: str) -> List[Dict]:
     # Fjern fyldord fra starten - MEGET mere omfattende
     fillers = [
         r"^(øh|ehm|øhm|nå|nåh|altså|ikke|jo|bare)\s+",
+        r"^(skal vi have noget|skal vi have lidt|skal vi have|skal vi)\s+",
         r"^(jeg skal have|vi skal have|skal have|jeg skal|vi skal)\s+",
         r"^(jeg|vi|man|den|det|de|der|den der|det der|de der)\s+",
         r"^(det der|ham der|hende der|den slags|du ved|jeg tænker)\s+",
