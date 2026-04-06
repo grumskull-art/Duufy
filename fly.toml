@@ -7,6 +7,8 @@ primary_region = "ams"
 [env]
   PORT = "8080"
   PYTHONUNBUFFERED = "1"
+  DUUFY_PUBLIC_APP_URL = "https://duufy.verja.dev"
+  ALLOWED_ORIGINS = "https://duufy.verja.dev,capacitor://localhost,ionic://localhost"
 
 [http_service]
   internal_port = 8080
