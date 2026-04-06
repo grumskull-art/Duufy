@@ -2,458 +2,1405 @@
 <html lang="da">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="theme-color" content="#667eea">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#ef6f53">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Duufy">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <link rel="manifest" href="/manifest.json">
     <link rel="apple-touch-icon" href="/icon-192.png">
     <title>Duufy - Smart Indkøbsliste</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
+
         :root {
-            --primary: #667eea;
-            --primary-dark: #5a67d8;
-            --secondary: #764ba2;
-            --success: #48bb78;
-            --danger: #f56565;
-            --bg: #f7fafc;
-            --card: #ffffff;
-            --text: #2d3748;
-            --text-light: #718096;
-            --border: #e2e8f0;
+            --primary: #ef6f53;
+            --primary-dark: #c64e35;
+            --secondary: #23493e;
+            --secondary-soft: #dce8df;
+            --accent: #f3c96b;
+            --success: #4f8a67;
+            --danger: #d45b52;
+            --bg: #f5efe4;
+            --bg-deep: #eadfcf;
+            --card: rgba(255, 251, 245, 0.88);
+            --card-strong: #fffdf8;
+            --text: #202533;
+            --text-light: #6a7283;
+            --border: rgba(32, 37, 51, 0.08);
+            --shadow: 0 24px 60px rgba(39, 33, 22, 0.12);
+            --shadow-soft: 0 18px 40px rgba(39, 33, 22, 0.08);
         }
-        
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg);
+            font-family: 'Space Grotesk', sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(243, 201, 107, 0.28), transparent 28%),
+                radial-gradient(circle at top right, rgba(239, 111, 83, 0.18), transparent 24%),
+                linear-gradient(180deg, #f8f4ed 0%, var(--bg) 44%, #efe7d8 100%);
             color: var(--text);
             min-height: 100vh;
-            padding-bottom: 100px;
+            padding: 0 0 calc(132px + env(safe-area-inset-bottom, 0px));
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
-        
-        /* Header */
-        .header {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            color: white;
-            padding: 20px;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        
-        .header h1 {
-            font-size: 28px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .header .tagline {
-            font-size: 12px;
-            opacity: 0.9;
-            margin-top: 4px;
-        }
-        
-        .header-actions {
-            position: absolute;
-            right: 20px;
-            top: 50%;
-            transform: translateY(-50%);
-            display: flex;
-            gap: 10px;
-        }
-        
-        .header-btn {
-            background: rgba(255,255,255,0.2);
-            border: none;
-            color: white;
-            width: 40px;
-            height: 40px;
+
+        body::before,
+        body::after {
+            content: "";
+            position: fixed;
+            inset: auto;
+            width: 280px;
+            height: 280px;
             border-radius: 50%;
-            font-size: 18px;
-            cursor: pointer;
+            filter: blur(60px);
+            opacity: 0.32;
+            pointer-events: none;
+            z-index: 0;
         }
-        
-        /* Auth Screen */
+
+        body::before {
+            top: -70px;
+            right: -90px;
+            background: rgba(239, 111, 83, 0.38);
+        }
+
+        body::after {
+            left: -100px;
+            bottom: 120px;
+            background: rgba(79, 138, 103, 0.18);
+        }
+
+        button,
+        input {
+            font: inherit;
+        }
+
+        .auth-screen,
+        .app-container {
+            position: relative;
+            z-index: 1;
+        }
+
         .auth-screen {
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 80vh;
-            padding: 20px;
+            min-height: 100vh;
+            padding: 28px;
         }
-        
+
         .auth-card {
-            background: var(--card);
-            border-radius: 20px;
-            padding: 40px 30px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            position: relative;
+            width: min(100%, 460px);
+            padding: 42px 30px 30px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,248,241,0.92));
+            border: 1px solid rgba(255,255,255,0.7);
+            border-radius: 32px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(18px);
+            overflow: hidden;
         }
-        
+
+        .auth-card::before {
+            content: "";
+            position: absolute;
+            inset: -25% auto auto -15%;
+            width: 180px;
+            height: 180px;
+            background: radial-gradient(circle, rgba(239,111,83,0.18), transparent 70%);
+            pointer-events: none;
+        }
+
         .auth-logo {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 28px;
         }
-        
-        .auth-logo .icon { font-size: 64px; }
-        .auth-logo h2 { color: var(--primary); font-size: 32px; margin-top: 10px; }
-        .auth-logo p { color: var(--text-light); font-size: 14px; }
-        
+
+        .auth-logo .icon {
+            width: 78px;
+            height: 78px;
+            margin: 0 auto 16px;
+            border-radius: 24px;
+            display: grid;
+            place-items: center;
+            font-size: 40px;
+            background: linear-gradient(135deg, rgba(239,111,83,0.16), rgba(243,201,107,0.26));
+            border: 1px solid rgba(239,111,83,0.12);
+        }
+
+        .auth-logo h2,
+        .header-copy h1 {
+            font-family: 'Fraunces', serif;
+            letter-spacing: -0.03em;
+        }
+
+        .auth-logo h2 {
+            font-size: 38px;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .auth-logo p {
+            color: var(--text-light);
+            line-height: 1.5;
+        }
+
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 18px;
         }
-        
+
         .form-group label {
             display: block;
-            font-weight: 600;
             margin-bottom: 8px;
-            color: var(--text);
+            color: var(--text-light);
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
         }
-        
-        .form-group input {
+
+        .form-group input,
+        .groups-create input,
+        .quick-add-input {
             width: 100%;
-            padding: 14px 16px;
-            border: 2px solid var(--border);
-            border-radius: 12px;
-            font-size: 16px;
-            transition: border-color 0.2s;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.82);
+            border-radius: 18px;
+            padding: 15px 18px;
+            font-size: 15px;
+            color: var(--text);
+            transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
         }
-        
-        .form-group input:focus {
+
+        .form-group input:focus,
+        .groups-create input:focus,
+        .quick-add-input:focus {
             outline: none;
-            border-color: var(--primary);
+            border-color: rgba(239, 111, 83, 0.45);
+            box-shadow: 0 0 0 4px rgba(239, 111, 83, 0.12);
+            transform: translateY(-1px);
         }
-        
+
         .btn {
             width: 100%;
-            padding: 16px;
             border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
+            border-radius: 18px;
+            padding: 16px 18px;
+            font-weight: 700;
             cursor: pointer;
-            transition: transform 0.1s, opacity 0.2s;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
         }
-        
-        .btn:active { transform: scale(0.98); }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+
+        .btn:hover,
+        .quick-add-btn:hover,
+        .groups-create button:hover,
+        .voice-inline-btn:hover,
+        .header-btn:hover,
+        .item-delete:hover {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary,
+        .quick-add-btn,
+        .groups-create button,
+        .voice-fab {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
             color: white;
+            box-shadow: 0 18px 34px rgba(198, 78, 53, 0.22);
         }
-        
-        .btn-secondary {
-            background: transparent;
-            color: var(--primary);
-            margin-top: 10px;
-        }
-        
+
         .auth-switch {
-            text-align: center;
             margin-top: 20px;
+            text-align: center;
             color: var(--text-light);
         }
-        
+
         .auth-switch a {
-            color: var(--primary);
-            font-weight: 600;
+            color: var(--primary-dark);
+            font-weight: 700;
             cursor: pointer;
         }
-        
-        /* Main App */
+
         .app-container {
             display: none;
         }
-        
+
         .app-container.active {
             display: block;
         }
-        
-        /* Shopping List */
-        .list-container {
-            padding: 20px;
+
+        .app-shell {
+            width: min(100%, 860px);
+            margin: 0 auto;
+            padding: 22px 18px 0;
         }
-        
-        .list-header {
+
+        .header {
+            position: sticky;
+            top: 14px;
+            z-index: 100;
+            padding: 28px;
+            margin-bottom: 18px;
+            border-radius: 34px;
+            color: white;
+            background:
+                radial-gradient(circle at top right, rgba(243, 201, 107, 0.32), transparent 30%),
+                linear-gradient(135deg, #1f3f38 0%, #23493e 36%, #c64e35 100%);
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .header::after {
+            content: "";
+            position: absolute;
+            inset: auto -60px -80px auto;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+            pointer-events: none;
+        }
+
+        .header-top {
             display: flex;
             justify-content: space-between;
+            gap: 18px;
+            align-items: flex-start;
+        }
+
+        .brand-lockup {
+            max-width: 520px;
+        }
+
+        .brand-badge {
+            display: inline-flex;
             align-items: center;
-            margin-bottom: 20px;
+            gap: 8px;
+            padding: 8px 12px;
+            margin-bottom: 14px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.14);
+            border: 1px solid rgba(255,255,255,0.16);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
-        
-        .list-header h2 {
-            font-size: 20px;
-            color: var(--text);
+
+        .header-copy h1 {
+            font-size: clamp(34px, 5vw, 50px);
+            line-height: 0.95;
+            margin-bottom: 10px;
         }
-        
-        .list-count {
-            background: var(--primary);
-            color: white;
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 600;
+
+        .tagline {
+            max-width: 430px;
+            color: rgba(255,255,255,0.82);
+            line-height: 1.55;
+            font-size: 15px;
         }
-        
-        .item-card {
-            background: var(--card);
-            border-radius: 16px;
-            padding: 16px;
-            margin-bottom: 12px;
+
+        .header-actions {
             display: flex;
             align-items: center;
+            gap: 10px;
+        }
+
+        .header-btn {
+            border: 1px solid rgba(255,255,255,0.16);
+            background: rgba(255,255,255,0.12);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            backdrop-filter: blur(14px);
+        }
+
+        .hero-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .stat-card {
+            padding: 16px 18px;
+            border-radius: 22px;
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.16);
+            backdrop-filter: blur(10px);
+        }
+
+        .stat-value {
+            display: block;
+            font-size: 22px;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .stat-value.group {
+            font-size: 18px;
+        }
+
+        .stat-label {
+            display: block;
+            margin-top: 6px;
+            color: rgba(255,255,255,0.74);
+            font-size: 12px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .content-stack {
+            display: grid;
+            gap: 18px;
+        }
+
+        .surface-card {
+            padding: 22px;
+            border-radius: 28px;
+            background: var(--card);
+            border: 1px solid rgba(255,255,255,0.65);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(18px);
+        }
+
+        .composer-card {
+            display: grid;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--primary-dark);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .composer-card h2 {
+            margin-top: 8px;
+            font-family: 'Fraunces', serif;
+            font-size: 30px;
+            letter-spacing: -0.03em;
+        }
+
+        .composer-note {
+            margin-top: 8px;
+            color: var(--text-light);
+            line-height: 1.55;
+            max-width: 520px;
+        }
+
+        .composer-actions {
+            display: flex;
+            gap: 12px;
+            align-items: stretch;
+            flex-wrap: wrap;
+        }
+
+        .list-tools {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .tool-group {
+            display: grid;
+            gap: 6px;
+            min-width: 180px;
+            flex: 1 1 180px;
+        }
+
+        .tool-label {
+            color: var(--text-light);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .tool-select {
+            width: 100%;
+            border: 1px solid var(--border);
+            background: rgba(255,255,255,0.82);
+            color: var(--text);
+            border-radius: 16px;
+            padding: 14px 16px;
+            font: inherit;
+        }
+
+        .quick-add-form {
+            flex: 1 1 360px;
+            display: flex;
+            gap: 12px;
+        }
+
+        .quick-add-btn,
+        .voice-inline-btn {
+            border: none;
+            border-radius: 18px;
+            padding: 15px 18px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .voice-inline-btn {
+            background: linear-gradient(135deg, rgba(35,73,62,0.12), rgba(79,138,103,0.2));
+            color: var(--secondary);
+            border: 1px solid rgba(35,73,62,0.1);
+        }
+
+        .list-container {
+            display: grid;
+            gap: 18px;
+            padding-bottom: 18px;
+        }
+
+        .list-header {
+            display: none;
+        }
+
+        .items-shell {
+            display: grid;
+            gap: 18px;
+        }
+
+        .items-section {
+            display: grid;
+            gap: 12px;
+        }
+
+        .section-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: var(--text-light);
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .section-pill {
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(35,73,62,0.08);
+            color: var(--secondary);
+            font-size: 12px;
+        }
+
+        .items-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .item-card {
+            display: grid;
+            grid-template-columns: auto auto 1fr auto;
             gap: 14px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            transition: transform 0.2s, opacity 0.3s;
+            align-items: center;
+            padding: 16px;
+            border-radius: 24px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,250,244,0.88));
+            border: 1px solid rgba(35,73,62,0.08);
+            box-shadow: 0 14px 24px rgba(39,33,22,0.06);
+            transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.2s ease;
         }
-        
+
+        .item-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 20px 28px rgba(39,33,22,0.08);
+        }
+
         .item-card.checked {
-            opacity: 0.5;
+            opacity: 0.72;
+            background: linear-gradient(180deg, rgba(255,252,248,0.88), rgba(243,239,233,0.9));
         }
-        
+
         .item-card.checked .item-name {
             text-decoration: line-through;
         }
-        
+
         .item-checkbox {
-            width: 28px;
-            height: 28px;
-            border: 2px solid var(--border);
-            border-radius: 8px;
+            width: 32px;
+            height: 32px;
+            border-radius: 12px;
+            border: 2px solid rgba(35,73,62,0.18);
+            background: white;
+            color: var(--secondary);
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
+            display: grid;
+            place-items: center;
+            font-weight: 700;
+            transition: all 0.18s ease;
             flex-shrink: 0;
         }
-        
+
         .item-checkbox.checked {
             background: var(--success);
             border-color: var(--success);
             color: white;
         }
-        
-        .item-image {
-            width: 50px;
-            height: 50px;
-            border-radius: 12px;
-            object-fit: cover;
-            background: var(--bg);
-            flex-shrink: 0;
+
+        .item-avatar {
+            width: 54px;
+            height: 54px;
+            border-radius: 18px;
+            display: grid;
+            place-items: center;
+            background: linear-gradient(135deg, rgba(243,201,107,0.34), rgba(239,111,83,0.18));
+            color: var(--secondary);
+            font-size: 24px;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.45);
         }
-        
-        .item-details {
-            flex: 1;
+
+        .item-main {
+            min-width: 0;
         }
-        
+
+        .item-topline {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: start;
+        }
+
         .item-name {
-            font-weight: 600;
-            font-size: 16px;
-            margin-bottom: 4px;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.15;
+            word-break: break-word;
         }
-        
-        .item-quantity {
-            color: var(--text-light);
-            font-size: 14px;
+
+        .item-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
         }
-        
+
+        .meta-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(35,73,62,0.08);
+            color: var(--secondary);
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .meta-pill.checked {
+            background: rgba(79,138,103,0.12);
+            color: var(--success);
+        }
+
         .item-delete {
-            width: 36px;
-            height: 36px;
             border: none;
-            background: #fee2e2;
+            background: rgba(212, 91, 82, 0.12);
             color: var(--danger);
-            border-radius: 10px;
+            border-radius: 14px;
+            padding: 10px 12px;
+            font-weight: 700;
             cursor: pointer;
-            font-size: 16px;
         }
-        
-        /* Voice Input */
+
+        .item-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .item-edit {
+            border: none;
+            background: rgba(35,73,62,0.1);
+            color: var(--secondary);
+            border-radius: 14px;
+            padding: 10px 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 56px 22px;
+            border-radius: 28px;
+            background: linear-gradient(180deg, rgba(255,252,248,0.9), rgba(255,248,240,0.78));
+            border: 1px dashed rgba(35,73,62,0.16);
+            color: var(--text-light);
+        }
+
+        .empty-state .icon {
+            font-size: 68px;
+            margin-bottom: 18px;
+        }
+
+        .empty-state h3 {
+            font-family: 'Fraunces', serif;
+            font-size: 30px;
+            color: var(--text);
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            line-height: 1.6;
+        }
+
         .voice-fab {
             position: fixed;
-            bottom: 90px;
-            right: 20px;
-            width: 64px;
-            height: 64px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            color: white;
+            right: max(18px, calc((100vw - 860px) / 2 + 18px));
+            bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+            width: 72px;
+            height: 72px;
             border: none;
-            font-size: 28px;
-            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.4);
+            border-radius: 24px;
+            color: white;
+            font-size: 30px;
             cursor: pointer;
-            z-index: 100;
-            transition: transform 0.2s;
+            z-index: 120;
+            transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
-        
-        .voice-fab:active { transform: scale(0.95); }
-        
+
+        .voice-fab:active { transform: scale(0.96); }
+
         .voice-fab.recording {
             animation: pulse 1s infinite;
-            background: var(--danger);
+            background: linear-gradient(135deg, var(--danger), #b43d35);
         }
-        
+
         @keyframes pulse {
-            0%, 100% { transform: scale(1); box-shadow: 0 4px 20px rgba(245, 101, 101, 0.4); }
-            50% { transform: scale(1.1); box-shadow: 0 4px 30px rgba(245, 101, 101, 0.6); }
+            0%, 100% { transform: scale(1); box-shadow: 0 14px 34px rgba(212,91,82,0.25); }
+            50% { transform: scale(1.07); box-shadow: 0 18px 42px rgba(212,91,82,0.34); }
         }
-        
-        /* Bottom Nav */
+
         .bottom-nav {
             position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            background: var(--card);
+            left: 50%;
+            bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+            transform: translateX(-50%);
+            width: min(92vw, 540px);
             display: flex;
-            justify-content: space-around;
-            padding: 12px 0;
-            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
-            border-top: 1px solid var(--border);
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px;
+            border-radius: 26px;
+            background: rgba(255,251,245,0.86);
+            border: 1px solid rgba(255,255,255,0.72);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(18px);
+            z-index: 110;
         }
-        
+
         .nav-item {
+            flex: 1;
             display: flex;
             flex-direction: column;
             align-items: center;
             gap: 4px;
+            padding: 10px 12px;
+            border-radius: 18px;
             color: var(--text-light);
             font-size: 12px;
             cursor: pointer;
-            padding: 8px 16px;
-            border-radius: 12px;
-            transition: all 0.2s;
+            transition: all 0.18s ease;
         }
-        
+
         .nav-item.active {
-            color: var(--primary);
-            background: rgba(102, 126, 234, 0.1);
+            color: var(--secondary);
+            background: linear-gradient(135deg, rgba(239,111,83,0.12), rgba(243,201,107,0.18));
+            box-shadow: inset 0 0 0 1px rgba(239,111,83,0.08);
         }
-        
+
         .nav-item .icon {
-            font-size: 24px;
+            font-size: 22px;
         }
-        
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: var(--text-light);
-        }
-        
-        .empty-state .icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-        }
-        
-        .empty-state h3 {
-            font-size: 20px;
-            color: var(--text);
-            margin-bottom: 10px;
-        }
-        
-        /* Toast */
+
         .toast {
             position: fixed;
-            bottom: 100px;
             left: 50%;
-            transform: translateX(-50%) translateY(100px);
-            background: var(--text);
+            bottom: 126px;
+            transform: translateX(-50%) translateY(24px);
+            min-width: 220px;
+            max-width: min(88vw, 520px);
+            padding: 14px 18px;
+            border-radius: 18px;
+            background: rgba(32,37,51,0.92);
             color: white;
-            padding: 14px 24px;
-            border-radius: 12px;
-            font-weight: 500;
+            text-align: center;
+            box-shadow: 0 18px 34px rgba(18,20,28,0.22);
             opacity: 0;
-            transition: all 0.3s;
+            transition: transform 0.24s ease, opacity 0.24s ease;
             z-index: 1000;
         }
-        
+
         .toast.show {
             transform: translateX(-50%) translateY(0);
             opacity: 1;
         }
-        
-        /* Voice Modal */
+
+        .install-banner {
+            position: fixed;
+            left: 50%;
+            top: 18px;
+            transform: translateX(-50%) translateY(-16px);
+            width: min(92vw, 520px);
+            display: none;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            border-radius: 18px;
+            background: rgba(255, 251, 245, 0.95);
+            border: 1px solid rgba(35,73,62,0.08);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(18px);
+            z-index: 300;
+        }
+
+        .install-banner.active {
+            display: flex;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .install-copy {
+            min-width: 0;
+        }
+
+        .install-title {
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .install-text {
+            color: var(--text-light);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .install-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .install-btn {
+            border: none;
+            border-radius: 14px;
+            padding: 10px 12px;
+            font-weight: 700;
+            cursor: pointer;
+            background: rgba(35,73,62,0.1);
+            color: var(--secondary);
+        }
+
         .voice-modal {
             position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.5);
+            inset: 0;
+            background: rgba(17, 21, 31, 0.55);
             display: none;
             align-items: center;
             justify-content: center;
             z-index: 200;
+            padding: 20px;
         }
-        
+
         .voice-modal.active {
             display: flex;
         }
-        
+
         .voice-modal-content {
-            background: white;
-            border-radius: 24px;
-            padding: 40px;
+            width: min(100%, 380px);
+            padding: 36px 30px;
+            border-radius: 28px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,248,241,0.94));
+            box-shadow: var(--shadow);
             text-align: center;
-            width: 90%;
-            max-width: 350px;
         }
-        
+
         .voice-indicator {
-            width: 100px;
-            height: 100px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            width: 94px;
+            height: 94px;
             margin: 0 auto 20px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            border-radius: 28px;
+            display: grid;
+            place-items: center;
             font-size: 40px;
             color: white;
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
             animation: pulse 1s infinite;
         }
-        
+
         .voice-text {
-            font-size: 18px;
-            color: var(--text);
-            margin-bottom: 10px;
             min-height: 27px;
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 10px;
         }
-        
+
         .voice-hint {
             color: var(--text-light);
-            font-size: 14px;
+            line-height: 1.5;
         }
-        
-        /* Loading */
-        .loading {
+
+        .groups-sheet {
+            position: fixed;
+            inset: 0;
+            display: none;
+            z-index: 250;
+        }
+
+        .groups-sheet.active {
+            display: block;
+        }
+
+        .groups-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(17,21,31,0.42);
+            backdrop-filter: blur(8px);
+        }
+
+        .groups-panel {
+            position: absolute;
+            inset: auto 0 0;
+            width: min(100%, 760px);
+            margin: 0 auto;
+            background: linear-gradient(180deg, rgba(255,252,246,0.97), rgba(249,244,236,0.96));
+            border-radius: 32px 32px 0 0;
+            padding: 24px 22px 30px;
+            box-shadow: var(--shadow);
+        }
+
+        .groups-panel-header {
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            justify-content: center;
-            padding: 40px;
+            margin-bottom: 16px;
         }
-        
-        .spinner {
+
+        .groups-panel-title {
+            font-family: 'Fraunces', serif;
+            font-size: 30px;
+            letter-spacing: -0.03em;
+        }
+
+        .groups-close {
             width: 40px;
             height: 40px;
-            border: 4px solid var(--border);
-            border-top-color: var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
+            border: none;
+            border-radius: 14px;
+            background: rgba(35,73,62,0.08);
+            color: var(--secondary);
+            cursor: pointer;
         }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
+
+        .groups-create {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        .groups-create button {
+            min-width: 92px;
+        }
+
+        .groups-list {
+            display: grid;
+            gap: 10px;
+            max-height: 48vh;
+            overflow: auto;
+        }
+
+        .invite-panel {
+            margin-top: 16px;
+            padding: 16px;
+            border-radius: 22px;
+            border: 1px solid rgba(35,73,62,0.1);
+            background: rgba(255,255,255,0.74);
+        }
+
+        .invite-panel-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .invite-panel-title {
+            font-weight: 700;
+        }
+
+        .invite-panel-meta {
+            color: var(--text-light);
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .invite-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .invite-row button {
+            min-width: 108px;
+        }
+
+        .pending-invites {
+            display: grid;
+            gap: 8px;
+        }
+
+        .pending-invite {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: center;
+            padding: 10px 12px;
+            border-radius: 14px;
+            background: rgba(35,73,62,0.06);
+            font-size: 13px;
+        }
+
+        .pending-invite strong {
+            font-size: 14px;
+        }
+
+        .pending-invite span {
+            color: var(--text-light);
+            white-space: nowrap;
+        }
+
+        .group-card {
+            width: 100%;
+            padding: 16px 18px;
+            border-radius: 20px;
+            border: 1px solid rgba(35,73,62,0.1);
+            background: rgba(255,255,255,0.76);
+            text-align: left;
+            cursor: pointer;
+            transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .group-card.active {
+            border-color: rgba(239,111,83,0.25);
+            background: linear-gradient(135deg, rgba(239,111,83,0.12), rgba(243,201,107,0.18));
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35);
+        }
+
+        .group-card-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .group-select {
+            flex: 1;
+            border: none;
+            background: transparent;
+            text-align: left;
+            cursor: pointer;
+            color: inherit;
+        }
+
+        .group-action {
+            border: none;
+            border-radius: 12px;
+            padding: 10px 12px;
+            font-size: 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .group-action.delete {
+            background: rgba(212, 91, 82, 0.12);
+            color: var(--danger);
+        }
+
+        .group-card-name {
+            font-weight: 700;
+            margin-bottom: 5px;
+        }
+
+        .group-card-meta {
+            color: var(--text-light);
+            font-size: 13px;
+        }
+
+        .edit-sheet {
+            position: fixed;
+            inset: 0;
+            display: none;
+            z-index: 260;
+        }
+
+        .edit-sheet.active {
+            display: block;
+        }
+
+        .edit-panel {
+            position: absolute;
+            inset: auto 0 0;
+            width: min(100%, 620px);
+            margin: 0 auto;
+            background: linear-gradient(180deg, rgba(255,252,246,0.98), rgba(249,244,236,0.98));
+            border-radius: 32px 32px 0 0;
+            padding: 24px 22px 30px;
+            box-shadow: var(--shadow);
+        }
+
+        .edit-form {
+            display: grid;
+            gap: 14px;
+        }
+
+        .edit-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .ghost-btn {
+            border: 1px solid rgba(35,73,62,0.12);
+            background: rgba(255,255,255,0.72);
+            color: var(--secondary);
+            border-radius: 16px;
+            padding: 14px 18px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .profile-sheet {
+            position: fixed;
+            inset: 0;
+            display: none;
+            z-index: 255;
+        }
+
+        .profile-sheet.active {
+            display: block;
+        }
+
+        .profile-panel {
+            position: absolute;
+            inset: auto 0 0;
+            width: min(100%, 680px);
+            margin: 0 auto;
+            background: linear-gradient(180deg, rgba(255,252,246,0.98), rgba(249,244,236,0.98));
+            border-radius: 32px 32px 0 0;
+            padding: 24px 22px 30px;
+            box-shadow: var(--shadow);
+        }
+
+        .profile-summary {
+            padding: 16px 18px;
+            border-radius: 22px;
+            background: rgba(255,255,255,0.72);
+            border: 1px solid rgba(35,73,62,0.08);
+            margin-bottom: 16px;
+        }
+
+        .profile-email {
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+
+        .profile-note {
+            color: var(--text-light);
+            line-height: 1.5;
+            font-size: 14px;
+        }
+
+        .profile-actions-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .profile-action {
+            border: none;
+            border-radius: 18px;
+            padding: 16px;
+            background: rgba(255,255,255,0.8);
+            color: var(--text);
+            text-align: left;
+            cursor: pointer;
+            border: 1px solid rgba(35,73,62,0.08);
+        }
+
+        .profile-action strong {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        .profile-action span {
+            display: block;
+            color: var(--text-light);
+            line-height: 1.45;
+            font-size: 13px;
+        }
+
+        .profile-action.warn {
+            background: rgba(212, 91, 82, 0.1);
+            color: var(--danger);
+        }
+
+        .profile-action.warn span {
+            color: rgba(161, 65, 57, 0.9);
+        }
+
+        @media (max-width: 720px) {
+            .app-shell {
+                padding: 16px 14px 0;
+            }
+
+            .header {
+                top: 10px;
+                padding: 22px 20px;
+                border-radius: 28px;
+            }
+
+            .header-top {
+                flex-direction: column;
+            }
+
+            .header-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .hero-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .quick-add-form,
+            .composer-actions,
+            .groups-create,
+            .edit-actions {
+                flex-direction: column;
+            }
+
+            .item-card {
+                grid-template-columns: auto 1fr auto;
+            }
+
+            .item-avatar {
+                display: none;
+            }
+
+            .voice-fab {
+                right: 18px;
+                bottom: calc(104px + env(safe-area-inset-bottom, 0px));
+                width: 66px;
+                height: 66px;
+            }
+
+            .bottom-nav {
+                width: calc(100vw - 20px);
+                bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+            }
+
+            .profile-actions-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .invite-row {
+                flex-direction: column;
+            }
+        }
+
+        @media (max-width: 540px) {
+            body {
+                padding-bottom: calc(138px + env(safe-area-inset-bottom, 0px));
+            }
+
+            .auth-screen {
+                padding: 18px 14px;
+            }
+
+            .auth-card {
+                padding: 32px 20px 24px;
+                border-radius: 26px;
+            }
+
+            .auth-logo h2 {
+                font-size: 32px;
+            }
+
+            .header {
+                position: relative;
+                top: 0;
+                padding: 20px 18px;
+                border-radius: 24px;
+            }
+
+            .brand-badge,
+            .stat-label,
+            .section-heading {
+                font-size: 11px;
+            }
+
+            .header-copy h1 {
+                font-size: clamp(28px, 9vw, 36px);
+            }
+
+            .tagline,
+            .composer-note {
+                font-size: 14px;
+            }
+
+            .hero-stats {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .hero-stats .stat-card:last-child {
+                grid-column: 1 / -1;
+            }
+
+            .surface-card {
+                padding: 18px;
+                border-radius: 22px;
+            }
+
+            .composer-card h2,
+            .groups-panel-title,
+            .empty-state h3 {
+                font-size: 26px;
+            }
+
+            .quick-add-input,
+            .quick-add-btn,
+            .voice-inline-btn,
+            .groups-create button {
+                width: 100%;
+            }
+
+            .items-shell,
+            .items-section {
+                gap: 12px;
+            }
+
+            .item-card {
+                grid-template-columns: auto 1fr;
+                gap: 12px;
+                padding: 14px;
+                border-radius: 20px;
+            }
+
+            .item-checkbox {
+                margin-top: 2px;
+            }
+
+            .item-main {
+                grid-column: 2;
+            }
+
+            .item-topline {
+                display: block;
+            }
+
+            .item-name {
+                font-size: 17px;
+            }
+
+            .item-delete {
+                grid-column: 2;
+                justify-self: start;
+                margin-top: 2px;
+                padding: 8px 12px;
+            }
+
+            .item-actions {
+                grid-column: 2;
+                justify-self: start;
+                flex-wrap: wrap;
+            }
+
+            .groups-panel {
+                width: 100%;
+                padding: 20px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+                border-radius: 28px 28px 0 0;
+            }
+
+            .edit-panel {
+                width: 100%;
+                padding: 20px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+                border-radius: 28px 28px 0 0;
+            }
+
+            .profile-panel {
+                width: 100%;
+                padding: 20px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+                border-radius: 28px 28px 0 0;
+            }
+
+            .groups-list {
+                max-height: 54vh;
+            }
+
+            .invite-panel {
+                padding: 14px;
+                border-radius: 18px;
+            }
+
+            .group-card-row {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .group-action {
+                width: 100%;
+            }
+
+            .voice-fab {
+                width: 62px;
+                height: 62px;
+                font-size: 26px;
+            }
+
+            .bottom-nav {
+                width: calc(100vw - 12px);
+                padding: 8px;
+                border-radius: 22px;
+            }
+
+            .nav-item {
+                padding: 9px 8px;
+                font-size: 11px;
+            }
+
+            .toast {
+                bottom: calc(114px + env(safe-area-inset-bottom, 0px));
+            }
+
+            .install-banner {
+                top: 10px;
+                width: calc(100vw - 16px);
+                padding: 12px;
+                border-radius: 16px;
+                align-items: flex-start;
+            }
+
+            .install-actions {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -462,9 +1409,9 @@
     <div id="authScreen" class="auth-screen">
         <div class="auth-card">
             <div class="auth-logo">
-                <div class="icon">🧠</div>
+                <div class="icon">🛒</div>
                 <h2>Duufy</h2>
-                <p>Do you often forget? Duufy don't</p>
+                <p>Den hurtige indkøbsliste til travle hverdage, delte grupper og taleinput der faktisk hjælper.</p>
             </div>
             
             <form id="authForm">
@@ -495,29 +1442,90 @@
     
     <!-- Main App -->
     <div id="appContainer" class="app-container">
-        <header class="header">
-            <h1>🧠 Duufy</h1>
-            <p class="tagline">Do you often forget? Duufy don't</p>
-            <div class="header-actions">
-                <button class="header-btn" onclick="showProfile()">👤</button>
-            </div>
-        </header>
-        
-        <div class="list-container">
-            <div class="list-header">
-                <h2>Min Indkøbsliste</h2>
-                <span class="list-count" id="itemCount">0 varer</span>
-            </div>
+        <div class="app-shell">
+            <header class="header">
+                <div class="header-top">
+                    <div class="brand-lockup">
+                        <div class="brand-badge">Duufy Grocery Flow</div>
+                        <div class="header-copy">
+                            <h1>Indkøb, der faktisk føles nemt.</h1>
+                            <p class="tagline">Saml alt ét sted, tilføj varer på få sekunder og hold styr på familiens næste tur i butikken.</p>
+                        </div>
+                    </div>
+                    <div class="header-actions">
+                        <button class="header-btn" onclick="showGroups()">Grupper</button>
+                        <button class="header-btn" onclick="showProfile()">Profil</button>
+                    </div>
+                </div>
+                <div class="hero-stats">
+                    <div class="stat-card">
+                        <span class="stat-value" id="itemCount">0</span>
+                        <span class="stat-label">Aktive varer</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="completedCount">0</span>
+                        <span class="stat-label">Klaret</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value group" id="activeGroupLabel">Ingen gruppe</span>
+                        <span class="stat-label">Aktiv gruppe</span>
+                    </div>
+                </div>
+            </header>
             
-            <div id="itemsList">
-                <!-- Items loaded here -->
-            </div>
-            
-            <div id="emptyState" class="empty-state">
-                <div class="icon">🛒</div>
-                <h3>Listen er tom</h3>
-                <p>Tryk på mikrofonen og sig hvad du skal købe!</p>
-            </div>
+            <main class="content-stack">
+                <section class="surface-card composer-card">
+                    <div>
+                        <span class="eyebrow">Hurtig tilføjelse</span>
+                        <h2>Fyld listen uden friktion</h2>
+                        <p class="composer-note">Skriv en vare direkte, eller brug stemmen når hænderne er optaget. Duufy holder resten samlet og overskueligt.</p>
+                    </div>
+                    <div class="composer-actions">
+                        <form class="quick-add-form" onsubmit="addManualItem(event)">
+                            <input
+                                type="text"
+                                id="quickAddInput"
+                                class="quick-add-input"
+                                placeholder="Skriv fx '2 liter mælk' eller 'fredagsslik'"
+                                autocomplete="off"
+                            >
+                            <button type="submit" class="quick-add-btn">Tilføj vare</button>
+                        </form>
+                        <button type="button" class="voice-inline-btn" onclick="startVoice()">Brug stemmeinput</button>
+                    </div>
+                    <div class="list-tools">
+                        <label class="tool-group">
+                            <span class="tool-label">Visning</span>
+                            <select id="viewModeSelect" class="tool-select" onchange="changeViewMode(this.value)">
+                                <option value="all">Hele listen</option>
+                                <option value="open">Kun mangler</option>
+                                <option value="completed">Kun klaret</option>
+                            </select>
+                        </label>
+                        <label class="tool-group">
+                            <span class="tool-label">Sortering</span>
+                            <select id="sortModeSelect" class="tool-select" onchange="changeSortMode(this.value)">
+                                <option value="smart">Butiksflow</option>
+                                <option value="category">Kategori</option>
+                                <option value="name">Navn A-Å</option>
+                                <option value="recent">Nyeste først</option>
+                            </select>
+                        </label>
+                    </div>
+                </section>
+
+                <section class="surface-card list-container">
+                    <div id="itemsList" class="items-shell">
+                        <!-- Items loaded here -->
+                    </div>
+                    
+                    <div id="emptyState" class="empty-state">
+                        <div class="icon">🛒</div>
+                        <h3>Listen venter på dig</h3>
+                        <p>Tilføj din første vare med tastatur eller stemme, så bliver resten af turen i butikken meget lettere.</p>
+                    </div>
+                </section>
+            </main>
         </div>
         
         <button class="voice-fab" id="voiceFab" onclick="startVoice()">🎤</button>
@@ -531,11 +1539,97 @@
                 <span class="icon">👨‍👩‍👧‍👦</span>
                 <span>Grupper</span>
             </div>
-            <div class="nav-item" onclick="showSettings()">
-                <span class="icon">⚙️</span>
-                <span>Indstillinger</span>
+            <div class="nav-item" onclick="showCompleted()">
+                <span class="icon">✅</span>
+                <span>Klaret</span>
             </div>
         </nav>
+    </div>
+
+    <div id="groupsSheet" class="groups-sheet">
+        <div class="groups-backdrop" onclick="closeGroupsSheet()"></div>
+        <div class="groups-panel">
+            <div class="groups-panel-header">
+                <div class="groups-panel-title">Grupper</div>
+                <button class="groups-close" onclick="closeGroupsSheet()">✕</button>
+            </div>
+            <div class="groups-create">
+                <input type="text" id="groupNameInput" placeholder="Navn på ny gruppe">
+                <button onclick="createGroup()">Opret</button>
+            </div>
+            <div id="groupsList" class="groups-list"></div>
+            <div class="invite-panel">
+                <div class="invite-panel-header">
+                    <div class="invite-panel-title">Invitér til aktiv gruppe</div>
+                </div>
+                <div class="invite-panel-meta" id="inviteGroupMeta">Vælg en aktiv gruppe, og send derefter et link til den email der skal med.</div>
+                <div class="invite-row">
+                    <input type="email" id="inviteEmailInput" placeholder="navn@email.com" onkeydown="if (event.key === 'Enter') sendGroupInvite()">
+                    <button onclick="sendGroupInvite()">Invitér</button>
+                </div>
+                <div id="pendingInvites" class="pending-invites"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="editSheet" class="edit-sheet">
+        <div class="groups-backdrop" onclick="closeEditSheet()"></div>
+        <div class="edit-panel">
+            <div class="groups-panel-header">
+                <div class="groups-panel-title">Ret vare</div>
+                <button class="groups-close" onclick="closeEditSheet()">✕</button>
+            </div>
+            <form class="edit-form" onsubmit="saveItemEdit(event)">
+                <div class="form-group">
+                    <label for="editItemName">Navn</label>
+                    <input type="text" id="editItemName" placeholder="Varenavn">
+                </div>
+                <div class="form-group">
+                    <label for="editItemQuantity">Antal</label>
+                    <input type="text" id="editItemQuantity" placeholder="Fx 2 liter eller 1 stk">
+                </div>
+                <div class="edit-actions">
+                    <button type="button" class="ghost-btn" onclick="closeEditSheet()">Annuller</button>
+                    <button type="submit" class="btn btn-primary">Gem ændringer</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="profileSheet" class="profile-sheet">
+        <div class="groups-backdrop" onclick="closeProfileSheet()"></div>
+        <div class="profile-panel">
+            <div class="groups-panel-header">
+                <div class="groups-panel-title">Profil</div>
+                <button class="groups-close" onclick="closeProfileSheet()">✕</button>
+            </div>
+            <div class="profile-summary">
+                <div class="profile-email" id="profileEmail">Ikke logget ind</div>
+                <div class="profile-note">Herfra kan du dele din liste, rydde færdige varer og håndtere din konto uden en tom settings-side.</div>
+            </div>
+            <div class="profile-actions-grid">
+                <button class="profile-action" onclick="shareCurrentList()">
+                    <strong>Del liste</strong>
+                    <span>Åbn telefonens delingsmenu med de aktuelle varer.</span>
+                </button>
+                <button class="profile-action" onclick="copyCurrentList()">
+                    <strong>Kopiér liste</strong>
+                    <span>Læg listen på udklipsholderen til besked eller note.</span>
+                </button>
+                <button class="profile-action" onclick="clearCompletedItems()">
+                    <strong>Ryd klaret</strong>
+                    <span>Fjern alle varer du allerede har købt.</span>
+                </button>
+                <button class="profile-action" onclick="logout()">
+                    <strong>Log ud</strong>
+                    <span>Skift konto eller luk appen ned uden at miste data.</span>
+                </button>
+                <button class="profile-action warn" onclick="deleteAccount()">
+                    <strong>Slet konto</strong>
+                    <span>Permanent handling. Du skal selv slette grupper først, hvis de også skal væk.</span>
+                </button>
+            </div>
+        </div>
     </div>
     
     <!-- Voice Modal -->
@@ -549,16 +1643,43 @@
     
     <!-- Toast -->
     <div id="toast" class="toast"></div>
+    <div id="installBanner" class="install-banner">
+        <div class="install-copy">
+            <div class="install-title" id="installTitle">Installer Duufy</div>
+            <div class="install-text" id="installText">Føj appen til hjemmeskærmen for at åbne den som en rigtig app.</div>
+        </div>
+        <div class="install-actions">
+            <button type="button" class="install-btn" id="installActionBtn" onclick="handleInstallAction()">Installer</button>
+            <button type="button" class="install-btn" onclick="dismissInstallBanner()">Luk</button>
+        </div>
+    </div>
     
     <script>
         // API Base URL
         const API_BASE = window.location.origin;
+        const CLIENT_ID_KEY = 'duufy_client_id';
+        const INSTALL_DISMISSED_KEY = 'duufy_install_dismissed';
+        const CLIENT_ID = localStorage.getItem(CLIENT_ID_KEY) || (
+            typeof crypto !== 'undefined' && crypto.randomUUID
+                ? crypto.randomUUID()
+                : `duufy-${Date.now()}-${Math.random().toString(16).slice(2)}`
+        );
+        localStorage.setItem(CLIENT_ID_KEY, CLIENT_ID);
         
         // State
         let isSignUp = false;
         let currentUser = null;
         let accessToken = localStorage.getItem('duufy_token');
         let items = [];
+        let groups = [];
+        let activeGroupIds = [];
+        let viewMode = localStorage.getItem('duufy_view_mode') || 'all';
+        let sortMode = localStorage.getItem('duufy_sort_mode') || 'smart';
+        let editingItemId = null;
+        let refreshInFlight = null;
+        let deferredInstallPrompt = null;
+        let pendingInviteToken = new URLSearchParams(window.location.search).get('invite') || '';
+        let inviteFlowInFlight = null;
         
         // Check existing session
         if (accessToken) {
@@ -615,7 +1736,7 @@
         async function checkAuth() {
             try {
                 const response = await fetch(API_BASE + '/auth/me', {
-                    headers: { 'Authorization': 'Bearer ' + accessToken }
+                    headers: withClientHeaders({ 'Authorization': 'Bearer ' + accessToken })
                 });
                 
                 const result = await response.json();
@@ -636,6 +1757,10 @@
         function showApp() {
             document.getElementById('authScreen').style.display = 'none';
             document.getElementById('appContainer').classList.add('active');
+            syncToolState();
+            syncInstallBanner();
+            refreshAppData().then(() => maybeHandleInviteToken());
+            initRealtime();
         }
         
         function showAuth() {
@@ -644,21 +1769,795 @@
         }
         
         function logout() {
+            closeProfileSheet();
             localStorage.removeItem('duufy_token');
             accessToken = null;
             currentUser = null;
+            stopRealtime();
             showAuth();
             showToast('👋 Du er logget ud');
         }
-        
+
+        function handleExpiredSession(message = '🔒 Log ind igen') {
+            localStorage.removeItem('duufy_token');
+            accessToken = null;
+            currentUser = null;
+            items = [];
+            groups = [];
+            activeGroupIds = [];
+            stopRealtime();
+            showAuth();
+            showToast(message);
+        }
+
         // Items functions
         async function loadItems() {
             try {
-                const response = await fetch(API_BASE + '/items');
+                const response = await fetch(API_BASE + '/items', {
+                    headers: withClientHeaders()
+                });
+                if (response.status === 401) {
+                    handleExpiredSession('🔒 Log ind igen for at hente listen');
+                    return;
+                }
                 items = await response.json();
                 renderItems();
             } catch (error) {
                 console.error('Failed to load items:', error);
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function formatItemName(name) {
+            const value = String(name || '').trim();
+            if (!value) return 'Ukendt vare';
+            return value.charAt(0).toUpperCase() + value.slice(1);
+        }
+
+        function formatQuantity(item) {
+            const quantity = String(item.quantity || '').trim();
+            const unit = String(item.unit || '').trim();
+            if (quantity && unit && !quantity.includes(unit)) {
+                return `${quantity} ${unit}`;
+            }
+            if (quantity) return quantity;
+            if (unit) return unit;
+            return '1 stk';
+        }
+
+        function getItemEmoji(item) {
+            const text = `${item.name || ''} ${item.category || ''}`.toLowerCase();
+            if (/(mælk|yoghurt|ost|smør|fløde)/.test(text)) return '🥛';
+            if (/(brød|franskbrød|rugbrød|toast|bolle)/.test(text)) return '🍞';
+            if (/(basilikum|salat|agurk|tomat|kartoffel|gulerod|løg)/.test(text)) return '🥬';
+            if (/(æble|banan|citron|lime|appelsin|pære|bær)/.test(text)) return '🍎';
+            if (/(slik|chips|chokolade|fredagsslik)/.test(text)) return '🍬';
+            if (/(kaffe|te)/.test(text)) return '☕';
+            if (/(cola|sodavand|juice|saft|vand)/.test(text)) return '🥤';
+            if (/(kylling|bacon|kød|hakkekød|hamburgerryg)/.test(text)) return '🍖';
+            if (/(toiletpapir|sæbe|shampoo|opvask)/.test(text)) return '🧼';
+            return (String(item.name || '').trim().charAt(0) || '•').toUpperCase();
+        }
+
+        function withClientHeaders(headers = {}) {
+            const authHeaders = accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {};
+            return {
+                'X-Duufy-Client-Id': CLIENT_ID,
+                ...authHeaders,
+                ...headers
+            };
+        }
+
+        function isIosDevice() {
+            return /iphone|ipad|ipod/i.test(navigator.userAgent);
+        }
+
+        function isSafariBrowser() {
+            const ua = navigator.userAgent || '';
+            return /safari/i.test(ua) && !/crios|fxios|edgios|chrome|android/i.test(ua);
+        }
+
+        function isStandaloneApp() {
+            return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+        }
+
+        function showInstallBanner(title, text, actionLabel = 'Installer') {
+            if (isStandaloneApp()) return;
+            const dismissed = localStorage.getItem(INSTALL_DISMISSED_KEY);
+            if (dismissed === '1') return;
+
+            document.getElementById('installTitle').textContent = title;
+            document.getElementById('installText').textContent = text;
+            document.getElementById('installActionBtn').textContent = actionLabel;
+            document.getElementById('installBanner').classList.add('active');
+        }
+
+        function dismissInstallBanner(persist = true) {
+            document.getElementById('installBanner').classList.remove('active');
+            if (persist) {
+                localStorage.setItem(INSTALL_DISMISSED_KEY, '1');
+            }
+        }
+
+        function syncInstallBanner() {
+            if (isStandaloneApp()) {
+                dismissInstallBanner(false);
+                return;
+            }
+
+            if (deferredInstallPrompt) {
+                showInstallBanner(
+                    'Installer Duufy',
+                    'Læg Duufy på hjemmeskærmen og åbn den som en rigtig app.',
+                    'Installer'
+                );
+                return;
+            }
+
+            if (isIosDevice()) {
+                if (isSafariBrowser()) {
+                    showInstallBanner(
+                        'Installer på iPhone',
+                        'Tryk Del i Safari og vælg "Føj til hjemmeskærm" for at installere Duufy som app.',
+                        'Guide'
+                    );
+                } else {
+                    showInstallBanner(
+                        'Åbn i Safari',
+                        'På iPhone skal du åbne linket i Safari og vælge "Føj til hjemmeskærm" for at installere appen.',
+                        'Guide'
+                    );
+                }
+            }
+        }
+
+        async function handleInstallAction() {
+            if (deferredInstallPrompt) {
+                deferredInstallPrompt.prompt();
+                await deferredInstallPrompt.userChoice.catch(() => {});
+                deferredInstallPrompt = null;
+                dismissInstallBanner(false);
+                return;
+            }
+
+            if (isIosDevice()) {
+                showToast(isSafariBrowser()
+                    ? '📲 Safari: tryk Del og vælg "Føj til hjemmeskærm"'
+                    : '📲 Åbn linket i Safari og vælg "Føj til hjemmeskærm"');
+            }
+        }
+
+        function getCategoryRank(item) {
+            const text = `${item.category || ''} ${item.name || ''}`.toLowerCase();
+            if (/(frugt|grønt|basilikum|salat|agurk|tomat|kartoffel|gulerod|løg|æble|banan)/.test(text)) return 1;
+            if (/(brød|franskbrød|rugbrød|toast|bolle)/.test(text)) return 2;
+            if (/(mælk|yoghurt|ost|smør|fløde)/.test(text)) return 3;
+            if (/(kylling|bacon|kød|hakkekød|hamburgerryg)/.test(text)) return 4;
+            if (/(kaffe|te|cola|sodavand|juice|saft|vand)/.test(text)) return 5;
+            if (/(slik|chips|chokolade|fredagsslik)/.test(text)) return 6;
+            return 7;
+        }
+
+        function sortItems(sectionItems) {
+            const sorted = [...sectionItems];
+            if (sortMode === 'name') {
+                return sorted.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'da'));
+            }
+            if (sortMode === 'recent') {
+                return sorted.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            }
+            if (sortMode === 'category' || sortMode === 'smart') {
+                return sorted.sort((a, b) => {
+                    const rankDiff = getCategoryRank(a) - getCategoryRank(b);
+                    if (rankDiff !== 0) return rankDiff;
+                    return String(a.name || '').localeCompare(String(b.name || ''), 'da');
+                });
+            }
+            return sorted;
+        }
+
+        function syncToolState() {
+            const viewSelect = document.getElementById('viewModeSelect');
+            const sortSelect = document.getElementById('sortModeSelect');
+            if (viewSelect) viewSelect.value = viewMode;
+            if (sortSelect) sortSelect.value = sortMode;
+        }
+
+        function changeViewMode(nextMode) {
+            viewMode = nextMode || 'all';
+            localStorage.setItem('duufy_view_mode', viewMode);
+            syncToolState();
+            if (!document.getElementById('groupsSheet').classList.contains('active')) {
+                setActiveNav(viewMode === 'completed' ? 2 : 0);
+            }
+            renderItems();
+        }
+
+        function changeSortMode(nextMode) {
+            sortMode = nextMode || 'smart';
+            localStorage.setItem('duufy_sort_mode', sortMode);
+            syncToolState();
+            renderItems();
+        }
+
+        function setActiveNav(index) {
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            const target = document.querySelectorAll('.nav-item')[index];
+            if (target) target.classList.add('active');
+        }
+
+        function buildShareText() {
+            const activeGroup = groups.find(group => activeGroupIds.includes(group.id));
+            const title = activeGroup ? `Indkøbsliste: ${activeGroup.name}` : 'Indkøbsliste';
+            const openItems = sortItems(items.filter(item => !item.checked));
+            const doneItems = sortItems(items.filter(item => item.checked));
+            const lines = [title, ''];
+
+            if (openItems.length) {
+                lines.push('Mangler:');
+                openItems.forEach(item => lines.push(`- ${formatItemName(item.name)} (${formatQuantity(item)})`));
+            }
+            if (doneItems.length) {
+                lines.push('', 'Klaret:');
+                doneItems.forEach(item => lines.push(`- ${formatItemName(item.name)} (${formatQuantity(item)})`));
+            }
+            if (!openItems.length && !doneItems.length) {
+                lines.push('Listen er tom.');
+            }
+            return lines.join('\n');
+        }
+
+        function updateActiveGroupLabel() {
+            const label = document.getElementById('activeGroupLabel');
+            const activeGroup = groups.find(group => activeGroupIds.includes(group.id));
+            label.textContent = activeGroup ? activeGroup.name : 'Ingen gruppe';
+            const inviteMeta = document.getElementById('inviteGroupMeta');
+            if (inviteMeta) {
+                inviteMeta.textContent = activeGroup
+                    ? `Invitationen sendes til gruppen "${activeGroup.name}".`
+                    : 'Vælg en aktiv gruppe, og send derefter et link til den email der skal med.';
+            }
+        }
+
+        function renderGroups() {
+            const container = document.getElementById('groupsList');
+            if (!groups.length) {
+                container.innerHTML = '<div class="group-card-meta">Ingen grupper endnu. Opret din første gruppe ovenfor.</div>';
+                updateActiveGroupLabel();
+                return;
+            }
+
+            container.innerHTML = groups.map(group => `
+                <div class="group-card ${activeGroupIds.includes(group.id) ? 'active' : ''}">
+                    <div class="group-card-row">
+                        <button class="group-select" onclick="setActiveGroup('${group.id}')">
+                            <div class="group-card-name">${escapeHtml(group.name)}</div>
+                            <div class="group-card-meta">${group.member_count} medlemmer${activeGroupIds.includes(group.id) ? ' · aktiv' : ''}</div>
+                        </button>
+                        <button class="group-action delete" onclick="deleteGroup('${group.id}', '${escapeHtml(group.name)}')">Slet</button>
+                    </div>
+                </div>
+            `).join('');
+            updateActiveGroupLabel();
+        }
+
+        async function loadGroups() {
+            try {
+                const response = await fetch(API_BASE + '/groups', {
+                    headers: withClientHeaders()
+                });
+                if (response.status === 401) {
+                    handleExpiredSession('🔒 Log ind igen for at hente grupper');
+                    return;
+                }
+                const data = await response.json();
+                groups = Array.isArray(data.groups) ? data.groups : [];
+                activeGroupIds = Array.isArray(data.active_groups) ? data.active_groups : [];
+                renderGroups();
+                await loadPendingInvitations();
+            } catch (error) {
+                console.error('Failed to load groups:', error);
+            }
+        }
+
+        async function refreshAppData() {
+            if (refreshInFlight) {
+                return refreshInFlight;
+            }
+            refreshInFlight = (async () => {
+                await loadGroups();
+                await loadItems();
+            })();
+
+            try {
+                await refreshInFlight;
+            } finally {
+                refreshInFlight = null;
+            }
+        }
+
+        function clearInviteTokenFromUrl() {
+            if (!pendingInviteToken) return;
+            const url = new URL(window.location.href);
+            url.searchParams.delete('invite');
+            pendingInviteToken = '';
+            window.history.replaceState({}, '', url.toString());
+        }
+
+        async function loadPendingInvitations() {
+            const container = document.getElementById('pendingInvites');
+            const activeGroup = groups.find(group => activeGroupIds.includes(group.id));
+            if (!container) return;
+            if (!activeGroup) {
+                container.innerHTML = '';
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + `/group/${encodeURIComponent(activeGroup.id)}/invitations`, {
+                    headers: withClientHeaders()
+                });
+                if (response.status === 401) {
+                    handleExpiredSession('🔒 Log ind igen for at hente invitationer');
+                    return;
+                }
+                if (!response.ok) {
+                    container.innerHTML = '';
+                    return;
+                }
+
+                const data = await response.json();
+                const invitations = Array.isArray(data.invitations) ? data.invitations : [];
+                if (!invitations.length) {
+                    container.innerHTML = '<div class="group-card-meta">Ingen ventende invitationer endnu.</div>';
+                    return;
+                }
+
+                container.innerHTML = invitations.map(invite => `
+                    <div class="pending-invite">
+                        <strong>${escapeHtml(invite.email)}</strong>
+                        <span>Afventer</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Failed to load invitations:', error);
+                container.innerHTML = '';
+            }
+        }
+
+        async function sendGroupInvite() {
+            const activeGroup = groups.find(group => activeGroupIds.includes(group.id));
+            const input = document.getElementById('inviteEmailInput');
+            const email = String(input?.value || '').trim().toLowerCase();
+
+            if (!activeGroup) {
+                showToast('❌ Vælg en aktiv gruppe først');
+                return;
+            }
+            if (!email || !email.includes('@') || !email.includes('.')) {
+                showToast('❌ Skriv en gyldig email');
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + '/invite/send', {
+                    method: 'POST',
+                    headers: withClientHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ email, group_id: activeGroup.id })
+                });
+                const result = await response.json();
+                if (response.status === 401) {
+                    handleExpiredSession('🔒 Log ind igen for at sende invitationer');
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error(result?.error?.message || result?.message || 'Kunne ikke sende invitation');
+                }
+
+                input.value = '';
+                await loadPendingInvitations();
+
+                if (result.email_sent) {
+                    showToast(`📧 Invitation sendt til ${email}`);
+                    return;
+                }
+
+                if (result.invite_url) {
+                    try {
+                        await navigator.clipboard.writeText(result.invite_url);
+                        showToast(`📋 Invite-link kopieret til ${email}`);
+                    } catch (error) {
+                        console.error('Failed to copy invite link:', error);
+                        showToast('📋 Invitation oprettet. Del linket manuelt.');
+                    }
+                    return;
+                }
+
+                showToast('✅ Invitation oprettet');
+            } catch (error) {
+                console.error('Invite send failed:', error);
+                showToast(`❌ ${error.message || 'Kunne ikke sende invitation'}`);
+            }
+        }
+
+        async function maybeHandleInviteToken() {
+            if (!pendingInviteToken || !accessToken || !currentUser) {
+                return;
+            }
+            if (inviteFlowInFlight) {
+                return inviteFlowInFlight;
+            }
+
+            inviteFlowInFlight = (async () => {
+                try {
+                    const previewResponse = await fetch(API_BASE + `/invite/${encodeURIComponent(pendingInviteToken)}`);
+                    const previewData = await previewResponse.json();
+                    if (!previewResponse.ok) {
+                        clearInviteTokenFromUrl();
+                        showToast('❌ Invitationen findes ikke længere');
+                        return;
+                    }
+
+                    const invitation = previewData.invitation || {};
+                    const groupName = invitation.group_name || 'denne gruppe';
+                    const invitedEmail = String(invitation.email || '').trim().toLowerCase();
+                    const currentEmail = String(currentUser?.email || '').trim().toLowerCase();
+
+                    if (invitation.status === 'expired') {
+                        clearInviteTokenFromUrl();
+                        showToast('⌛ Invitationen er udløbet');
+                        return;
+                    }
+
+                    if (invitedEmail && currentEmail && invitedEmail !== currentEmail) {
+                        clearInviteTokenFromUrl();
+                        showToast(`🔒 Invitationen hører til ${invitedEmail}`);
+                        return;
+                    }
+
+                    if (invitation.status !== 'accepted') {
+                        const accepted = confirm(`Vil du deltage i gruppen "${groupName}"?`);
+                        if (!accepted) {
+                            clearInviteTokenFromUrl();
+                            return;
+                        }
+                    }
+
+                    const acceptResponse = await fetch(API_BASE + `/invite/${encodeURIComponent(pendingInviteToken)}/accept`, {
+                        method: 'POST',
+                        headers: withClientHeaders({ 'Content-Type': 'application/json' })
+                    });
+                    const acceptData = await acceptResponse.json();
+                    if (!acceptResponse.ok) {
+                        clearInviteTokenFromUrl();
+                        throw new Error(acceptData?.error?.message || 'Kunne ikke acceptere invitationen');
+                    }
+
+                    clearInviteTokenFromUrl();
+                    await refreshAppData();
+                    showToast(`✅ Du er nu med i ${acceptData.group_name || groupName}`);
+                } catch (error) {
+                    console.error('Invite accept failed:', error);
+                    showToast(`❌ ${error.message || 'Kunne ikke åbne invitationen'}`);
+                } finally {
+                    inviteFlowInFlight = null;
+                }
+            })();
+
+            return inviteFlowInFlight;
+        }
+
+        function closeGroupsSheet() {
+            document.getElementById('groupsSheet').classList.remove('active');
+            setActiveNav(viewMode === 'completed' ? 2 : 0);
+        }
+
+        function openEditSheet(itemId) {
+            const item = items.find(entry => entry.id === itemId);
+            if (!item) return;
+            editingItemId = itemId;
+            document.getElementById('editItemName').value = item.name || '';
+            document.getElementById('editItemQuantity').value = item.quantity || '';
+            document.getElementById('editSheet').classList.add('active');
+        }
+
+        function closeEditSheet() {
+            editingItemId = null;
+            document.getElementById('editSheet').classList.remove('active');
+        }
+
+        function showProfile() {
+            const email = currentUser?.email || 'Ikke logget ind';
+            document.getElementById('profileEmail').textContent = email;
+            document.getElementById('profileSheet').classList.add('active');
+        }
+
+        function closeProfileSheet() {
+            document.getElementById('profileSheet').classList.remove('active');
+        }
+
+        async function saveItemEdit(event) {
+            event.preventDefault();
+            if (!editingItemId) return;
+
+            const name = document.getElementById('editItemName').value.trim();
+            const quantity = document.getElementById('editItemQuantity').value.trim();
+            if (!name) {
+                showToast('❌ Varen skal have et navn');
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + `/items/${encodeURIComponent(editingItemId)}`, {
+                    method: 'PATCH',
+                    headers: withClientHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ name, quantity })
+                });
+                if (!response.ok) {
+                    throw new Error('Kunne ikke gemme vare');
+                }
+
+                closeEditSheet();
+                await loadItems();
+                showToast('✏️ Vare opdateret');
+            } catch (error) {
+                console.error('Save item edit failed:', error);
+                showToast('❌ Kunne ikke gemme ændringer');
+            }
+        }
+
+        async function shareCurrentList() {
+            const text = buildShareText();
+            try {
+                if (navigator.share) {
+                    await navigator.share({
+                        title: 'Duufy indkøbsliste',
+                        text
+                    });
+                    showToast('📤 Liste delt');
+                    return;
+                }
+                await copyCurrentList();
+            } catch (error) {
+                if (error && error.name === 'AbortError') return;
+                console.error('Share list failed:', error);
+                showToast('❌ Kunne ikke dele listen');
+            }
+        }
+
+        async function copyCurrentList() {
+            const text = buildShareText();
+            try {
+                await navigator.clipboard.writeText(text);
+                showToast('📋 Liste kopieret');
+            } catch (error) {
+                console.error('Copy list failed:', error);
+                showToast('❌ Kunne ikke kopiere listen');
+            }
+        }
+
+        async function clearCompletedItems() {
+            const completedItems = items.filter(item => item.checked);
+            if (!completedItems.length) {
+                showToast('✅ Ingen klaret-varer at rydde');
+                return;
+            }
+
+            if (!confirm(`Fjern ${completedItems.length} klaret vare${completedItems.length === 1 ? '' : 'r'} fra listen?`)) {
+                return;
+            }
+
+            try {
+                for (const item of completedItems) {
+                    const response = await fetch(API_BASE + `/items/id/${encodeURIComponent(item.id)}`, {
+                        method: 'DELETE',
+                        headers: withClientHeaders()
+                    });
+                    if (!response.ok) {
+                        throw new Error('Kunne ikke rydde klaret varer');
+                    }
+                }
+                await loadItems();
+                closeProfileSheet();
+                showToast('🧹 Klaret-listen er ryddet');
+            } catch (error) {
+                console.error('Clear completed failed:', error);
+                showToast('❌ Kunne ikke rydde klaret varer');
+            }
+        }
+
+        async function deleteAccount() {
+            const email = currentUser?.email || 'denne konto';
+            if (!confirm(`Vil du permanent slette ${email}?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + '/auth/account', {
+                    method: 'DELETE',
+                    headers: withClientHeaders({
+                        ...(accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {})
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error('Kunne ikke slette konto');
+                }
+
+                closeProfileSheet();
+                localStorage.removeItem('duufy_token');
+                accessToken = null;
+                currentUser = null;
+                items = [];
+                groups = [];
+                activeGroupIds = [];
+                stopRealtime();
+                showAuth();
+                showToast('🗑️ Konto slettet');
+            } catch (error) {
+                console.error('Delete account failed:', error);
+                showToast('❌ Kunne ikke slette konto');
+            }
+        }
+
+        async function setActiveGroup(groupId) {
+            try {
+                const response = await fetch(API_BASE + '/active-groups', {
+                    method: 'POST',
+                    headers: withClientHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify([groupId])
+                });
+                if (!response.ok) {
+                    throw new Error('Kunne ikke vælge gruppe');
+                }
+                activeGroupIds = [groupId];
+                renderGroups();
+                closeGroupsSheet();
+                await loadItems();
+                showToast('✅ Gruppe valgt');
+            } catch (error) {
+                console.error('Set active group failed:', error);
+                showToast('❌ Kunne ikke vælge gruppe');
+            }
+        }
+
+        async function createGroup() {
+            const input = document.getElementById('groupNameInput');
+            const name = input.value.trim();
+            if (!name) {
+                showToast('❌ Skriv et gruppenavn');
+                return;
+            }
+
+            const ownerId = currentUser?.id || currentUser?.email || '';
+            try {
+                const response = await fetch(API_BASE + '/groups/create', {
+                    method: 'POST',
+                    headers: withClientHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ name, owner_id: ownerId })
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText);
+                }
+                const data = await response.json();
+                const groupId = data.group_id;
+
+                if (groupId && !groups.some(group => group.id === groupId)) {
+                    groups = [
+                        ...groups,
+                        { id: groupId, name, member_count: 0, item_count: 0 }
+                    ];
+                }
+                activeGroupIds = groupId ? [groupId] : activeGroupIds;
+                renderGroups();
+                input.value = '';
+                await loadItems();
+                closeGroupsSheet();
+                showToast(`✅ Oprettede gruppen ${name}`);
+            } catch (error) {
+                console.error('Create group failed:', error);
+                showToast('❌ Kunne ikke oprette gruppe');
+            }
+        }
+
+        async function deleteGroup(groupId, groupName) {
+            const label = String(groupName || 'denne gruppe')
+                .replaceAll('&amp;', '&')
+                .replaceAll('&lt;', '<')
+                .replaceAll('&gt;', '>')
+                .replaceAll('&quot;', '"')
+                .replaceAll('&#39;', "'");
+
+            if (!confirm(`Vil du slette gruppen "${label}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(API_BASE + `/groups/${encodeURIComponent(groupId)}`, {
+                    method: 'DELETE',
+                    headers: withClientHeaders()
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText);
+                }
+
+                const result = await response.json();
+                groups = groups.filter(group => group.id !== groupId);
+                activeGroupIds = Array.isArray(result.active_groups) ? result.active_groups : [];
+                renderGroups();
+                await loadItems();
+                showToast(`🗑️ Slettede ${label}`);
+            } catch (error) {
+                console.error('Delete group failed:', error);
+                showToast('❌ Kunne ikke slette gruppe');
+            }
+        }
+
+        async function addManualItem(event) {
+            event.preventDefault();
+            const input = document.getElementById('quickAddInput');
+            const value = input.value.trim();
+            if (!value) {
+                showToast('❌ Skriv en vare først');
+                return;
+            }
+
+            try {
+                const parseResponse = await fetch(API_BASE + '/ai/parse', {
+                    method: 'POST',
+                    headers: withClientHeaders({
+                        'Content-Type': 'application/json',
+                        ...(accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {})
+                    }),
+                    body: JSON.stringify({
+                        text: value,
+                        text_alternatives: [value],
+                        force_ai: false
+                    })
+                });
+
+                let parsedItems = [];
+                if (parseResponse.status === 401) {
+                    localStorage.removeItem('duufy_token');
+                    accessToken = null;
+                    currentUser = null;
+                    stopRealtime();
+                    showAuth();
+                    showToast('🔒 Log ind igen for at tilføje varer');
+                    return;
+                }
+                if (parseResponse.ok) {
+                    const result = await parseResponse.json();
+                    parsedItems = Array.isArray(result.items) ? result.items : [];
+                }
+
+                const itemsToAdd = parsedItems.length ? parsedItems : [{ item: value, quantity: '1' }];
+                for (const item of itemsToAdd) {
+                    const addResponse = await fetch(API_BASE + '/items', {
+                        method: 'POST',
+                        headers: withClientHeaders({ 'Content-Type': 'application/json' }),
+                        body: JSON.stringify(item)
+                    });
+                    if (!addResponse.ok) {
+                        throw new Error('Kunne ikke tilføje vare');
+                    }
+                }
+
+                input.value = '';
+                await loadItems();
+                showToast(`✅ Tilføjede ${itemsToAdd.length} vare${itemsToAdd.length === 1 ? '' : 'r'}`);
+            } catch (error) {
+                console.error('Manual add failed:', error);
+                showToast('❌ Kunne ikke tilføje vare');
             }
         }
         
@@ -666,11 +2565,13 @@
             const container = document.getElementById('itemsList');
             const emptyState = document.getElementById('emptyState');
             const countEl = document.getElementById('itemCount');
+            const completedEl = document.getElementById('completedCount');
             
-            const uncheckedItems = items.filter(i => !i.checked);
-            const checkedItems = items.filter(i => i.checked);
+            const uncheckedItems = sortItems(items.filter(i => !i.checked));
+            const checkedItems = sortItems(items.filter(i => i.checked));
             
-            countEl.textContent = `${uncheckedItems.length} varer`;
+            countEl.textContent = String(uncheckedItems.length);
+            completedEl.textContent = String(checkedItems.length);
             
             if (items.length === 0) {
                 container.innerHTML = '';
@@ -679,24 +2580,62 @@
             }
             
             emptyState.style.display = 'none';
-            
-            container.innerHTML = [...uncheckedItems, ...checkedItems].map(item => `
-                <div class="item-card ${item.checked ? 'checked' : ''}" data-id="${item.name}">
-                    <div class="item-checkbox ${item.checked ? 'checked' : ''}" onclick="toggleItem('${item.name}')">
-                        ${item.checked ? '✓' : ''}
-                    </div>
-                    <img class="item-image" src="${item.image_url || '/placeholder.png'}" onerror="this.src='https://via.placeholder.com/50?text=🛒'">
-                    <div class="item-details">
-                        <div class="item-name">${item.name}</div>
-                        <div class="item-quantity">${item.quantity || ''} ${item.unit || ''}</div>
-                    </div>
-                    <button class="item-delete" onclick="deleteItem('${item.name}')">🗑️</button>
-                </div>
-            `).join('');
+
+            const renderSection = (sectionItems, title, meta, checked = false) => {
+                if (!sectionItems.length) return '';
+                return `
+                    <section class="items-section">
+                        <div class="section-heading">
+                            <span>${title}</span>
+                            <span class="section-pill">${meta}</span>
+                        </div>
+                        <div class="items-grid">
+                            ${sectionItems.map(item => {
+                                const encodedName = encodeURIComponent(item.name || '');
+                                const encodedId = encodeURIComponent(item.id || '');
+                                return `
+                                    <article class="item-card ${item.checked ? 'checked' : ''}" data-id="${encodedName}">
+                                        <button class="item-checkbox ${item.checked ? 'checked' : ''}" onclick="toggleItem('${encodedId}', '${encodedName}')">${item.checked ? '✓' : ''}</button>
+                                        <div class="item-avatar">${escapeHtml(getItemEmoji(item))}</div>
+                                        <div class="item-main">
+                                            <div class="item-topline">
+                                                <div class="item-name">${escapeHtml(formatItemName(item.name))}</div>
+                                            </div>
+                                            <div class="item-meta">
+                                                <span class="meta-pill">${escapeHtml(formatQuantity(item))}</span>
+                                                <span class="meta-pill ${checked ? 'checked' : ''}">${checked ? 'Købt' : 'Mangler'}</span>
+                                            </div>
+                                        </div>
+                                        <div class="item-actions">
+                                            <button class="item-edit" onclick="openEditSheet('${encodedId}')">Ret</button>
+                                            <button class="item-delete" onclick="deleteItem('${encodedId}', '${encodedName}')">Slet</button>
+                                        </div>
+                                    </article>
+                                `;
+                            }).join('')}
+                        </div>
+                    </section>
+                `;
+            };
+
+            const sections = [];
+            if (viewMode !== 'completed') {
+                sections.push(renderSection(uncheckedItems, 'På listen nu', `${uncheckedItems.length} varer`));
+            }
+            if (viewMode !== 'open') {
+                sections.push(renderSection(checkedItems, 'Klaret', `${checkedItems.length} færdige`, true));
+            }
+
+            container.innerHTML = sections.join('');
+            if (!container.innerHTML.trim()) {
+                emptyState.style.display = 'block';
+            }
         }
         
-        async function toggleItem(name) {
-            const item = items.find(i => i.name === name);
+        async function toggleItem(encodedId, encodedName) {
+            const itemId = decodeURIComponent(encodedId || '');
+            const name = decodeURIComponent(encodedName);
+            const item = items.find(i => i.id === itemId) || items.find(i => i.name === name);
             if (!item) return;
             
             item.checked = !item.checked;
@@ -705,21 +2644,27 @@
             try {
                 await fetch(API_BASE + '/items/toggle', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name })
+                    headers: withClientHeaders({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify({ item_id: item.id || itemId || null, name })
                 });
             } catch (error) {
                 console.error('Toggle failed:', error);
             }
         }
         
-        async function deleteItem(name) {
-            items = items.filter(i => i.name !== name);
+        async function deleteItem(encodedId, encodedName) {
+            const itemId = decodeURIComponent(encodedId || '');
+            const name = decodeURIComponent(encodedName);
+            items = items.filter(i => i.id !== itemId);
             renderItems();
             
             try {
-                await fetch(API_BASE + `/items/${encodeURIComponent(name)}`, {
-                    method: 'DELETE'
+                const endpoint = itemId
+                    ? `/items/id/${encodeURIComponent(itemId)}`
+                    : `/items/${encodeURIComponent(name)}`;
+                await fetch(API_BASE + endpoint, {
+                    method: 'DELETE',
+                    headers: withClientHeaders()
                 });
                 showToast('🗑️ Vare slettet');
             } catch (error) {
@@ -809,28 +2754,47 @@
             try {
                 const response = await fetch(API_BASE + '/ai/parse', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: withClientHeaders({
+                        'Content-Type': 'application/json',
+                        ...(accessToken ? { 'Authorization': 'Bearer ' + accessToken } : {})
+                    }),
                     body: JSON.stringify({
                         text,
                         text_alternatives: textAlternatives,
                         force_ai: false
                     })
                 });
+
+                if (response.status === 401) {
+                    localStorage.removeItem('duufy_token');
+                    accessToken = null;
+                    currentUser = null;
+                    stopRealtime();
+                    showAuth();
+                    showToast('🔒 Log ind igen for at bruge stemmeinput');
+                    return;
+                }
                 
                 const result = await response.json();
                 
                 if (result.items && result.items.length > 0) {
-                    // Add items
+                    let addedCount = 0;
+
                     for (const item of result.items) {
-                        await fetch(API_BASE + '/items', {
+                        const addResponse = await fetch(API_BASE + '/items', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: withClientHeaders({ 'Content-Type': 'application/json' }),
                             body: JSON.stringify(item)
                         });
+                        if (!addResponse.ok) {
+                            const errorText = await addResponse.text();
+                            throw new Error(`Add item failed: ${addResponse.status} ${errorText}`);
+                        }
+                        addedCount += 1;
                     }
                     
                     await loadItems();
-                    showToast(`✅ Tilføjede ${result.items.length} varer`);
+                    showToast(`✅ Tilføjede ${addedCount} varer`);
                 } else {
                     showToast('❌ Kunne ikke forstå input');
                 }
@@ -842,26 +2806,24 @@
         
         // Navigation
         function showList() {
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.querySelectorAll('.nav-item')[0].classList.add('active');
+            closeProfileSheet();
+            setActiveNav(0);
+            changeViewMode('all');
+            closeGroupsSheet();
         }
         
-        function showGroups() {
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.querySelectorAll('.nav-item')[1].classList.add('active');
-            showToast('👨‍👩‍👧‍👦 Grupper kommer snart!');
+        async function showGroups() {
+            closeProfileSheet();
+            setActiveNav(1);
+            await loadGroups();
+            document.getElementById('groupsSheet').classList.add('active');
         }
-        
-        function showSettings() {
-            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-            document.querySelectorAll('.nav-item')[2].classList.add('active');
-            showToast('⚙️ Indstillinger kommer snart!');
-        }
-        
-        function showProfile() {
-            if (confirm('Vil du logge ud?')) {
-                logout();
-            }
+
+        function showCompleted() {
+            closeProfileSheet();
+            setActiveNav(2);
+            changeViewMode('completed');
+            showToast('✅ Viser klaret-listen');
         }
         
         // Toast
@@ -874,8 +2836,86 @@
         
         // Register Service Worker for PWA
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js').catch(() => {});
+            navigator.serviceWorker.register('/sw.js')
+                .then((registration) => registration.update().catch(() => {}))
+                .catch(() => {});
         }
+
+        window.addEventListener('beforeinstallprompt', (event) => {
+            event.preventDefault();
+            deferredInstallPrompt = event;
+            localStorage.removeItem(INSTALL_DISMISSED_KEY);
+            syncInstallBanner();
+        });
+
+        window.addEventListener('appinstalled', () => {
+            deferredInstallPrompt = null;
+            dismissInstallBanner(false);
+            showToast('📲 Duufy er installeret');
+        });
+
+        // Supabase Realtime - live sync between users
+        let realtimeChannel = null;
+
+        async function initRealtime() {
+            if (realtimeChannel) return;
+            try {
+                const configRes = await fetch(API_BASE + '/config');
+                const config = await configRes.json();
+                if (!config.supabase_url || !config.supabase_anon_key) return;
+
+                const sb = supabase.createClient(config.supabase_url, config.supabase_anon_key);
+                realtimeChannel = sb.channel('items-changes')
+                    .on('postgres_changes',
+                        { event: '*', schema: 'public', table: 'items' },
+                        (payload) => {
+                            console.log('Realtime update:', payload.eventType);
+                            refreshAppData();
+                        }
+                    )
+                    .subscribe((status) => {
+                        console.log('Realtime status:', status);
+                        if (status === 'SUBSCRIBED') {
+                            refreshAppData();
+                        }
+                    });
+            } catch (err) {
+                console.error('Realtime init failed:', err);
+            }
+        }
+
+        function stopRealtime() {
+            if (realtimeChannel) {
+                realtimeChannel.unsubscribe();
+                realtimeChannel = null;
+            }
+        }
+
+        window.addEventListener('focus', () => {
+            if (currentUser || accessToken) {
+                refreshAppData();
+            }
+        });
+
+        window.addEventListener('pageshow', () => {
+            if (currentUser || accessToken) {
+                refreshAppData();
+            }
+        });
+
+        window.addEventListener('online', () => {
+            if (currentUser || accessToken) {
+                refreshAppData();
+            }
+        });
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && (currentUser || accessToken)) {
+                refreshAppData();
+            }
+        });
+
+        syncInstallBanner();
     </script>
 </body>
-                    body: JSON.stringify({
+</html>

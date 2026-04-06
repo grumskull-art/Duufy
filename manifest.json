@@ -1,12 +1,15 @@
 {
+  "id": "/app",
   "name": "Duufy",
   "short_name": "Duufy",
   "description": "Do you often forget? Duufy don't - Smart indkøbsliste med AI",
   "start_url": "/app",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#667eea",
-  "theme_color": "#667eea",
+  "background_color": "#f5efe4",
+  "theme_color": "#ef6f53",
   "orientation": "portrait",
+  "categories": ["shopping", "productivity", "lifestyle"],
   "icons": [
     {
       "src": "/icon-192.png",

@@ -17,9 +17,9 @@ RUN mkdir -p /app/data
 # Expose port
 EXPOSE 8080
 
-# Health check
+# Health check without relying on curl in slim images
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)"
 
 # Run with production settings
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

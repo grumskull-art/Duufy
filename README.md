@@ -9,16 +9,64 @@ Delt indkobsliste-app med AI-drevet stemmeindtastning.
 - Anthropic Claude (AI parsing)
 - Fly.io (deployment)
 
-## Installation
+## Ubuntu Quickstart
 
-1. Klon: git clone https://github.com/DIT-BRUGERNAVN/duufy.git
-2. Venv: python -m venv .venv && .venv/Scripts/activate
-3. Deps: pip install -r requirements.txt
-4. .env: Opret med Supabase + API keys
-5. SQL: Kor supabase_schema.sql i Supabase
+```bash
+git clone https://github.com/grumskull-art/Duufy.git
+cd Duufy
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
-## Kor lokalt
-uvicorn main:app --reload --port 8000
+Node/Vite toolchain (Ubuntu):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+export NVM_DIR="$HOME/.nvm"
+. "$NVM_DIR/nvm.sh"
+nvm install --lts
+nvm use --lts
+npm install
+```
+
+## Kør Lokalt
+
+```bash
+npm run start
+```
+
+Alternativt direkte:
+
+```bash
+. .venv/bin/activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Kvalitetstjek
+
+```bash
+npm run test
+npm run build
+```
+
+## Git Flow (commit/push/PR)
+
+```bash
+git checkout -b feat/navn-paa-aendring
+git add .
+git commit -m "feat: kort beskrivelse"
+git push -u origin HEAD
+```
+
+PR via CLI (uden ekstra login):
+
+```bash
+./scripts/ghx pr create --fill
+```
+
+Alternativt: brug compare-linket på GitHub efter `git push`.
 
 ## Deploy til Fly.io
 fly auth login

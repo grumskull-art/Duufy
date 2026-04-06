@@ -60,6 +60,8 @@ def _headers(use_service_key: bool = False) -> dict[str, str]:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Prefer": "return=representation",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
     }
 
 
@@ -153,6 +155,25 @@ async def sign_up_async(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+async def delete_user_async(user_id: str) -> ApiResponse:
+    """Async: Delete user via Supabase Admin API."""
+    try:
+        client = get_async_client()
+        r = await client.delete(
+            f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+            headers=_headers(use_service_key=True),
+        )
+        if r.status_code in [200, 204]:
+            return {"success": True}
+        try:
+            data = r.json()
+        except Exception:
+            data = r.text
+        return {"success": False, "error": data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # Note: Sync auth functions are kept for now if they are used by any sync scripts.
 # They will continue to create their own clients.
 
@@ -170,6 +191,52 @@ def get_user(access_token: str) -> ApiResponse:
 
 
 # ============ DATABASE - ASYNC (for FastAPI) ============
+
+
+async def db_request_async(
+    method: str,
+    table: str,
+    query_params: str = "",
+    body: Optional[dict] = None,
+    use_service_key: bool = False,
+) -> ApiResponse:
+    """Generic async request for compound filters and operations.
+
+    Args:
+        method: HTTP method (GET, POST, PATCH, DELETE)
+        table: Supabase table name
+        query_params: Raw PostgREST query string, e.g. "group_id=eq.xxx&name=eq.milk"
+        body: JSON body for POST/PATCH
+        use_service_key: Use service role key (bypasses RLS)
+    """
+    try:
+        client = get_async_client()
+        url = f"{SUPABASE_URL}/rest/v1/{table}"
+        if query_params:
+            url += f"?{query_params}"
+
+        headers = _headers(use_service_key)
+        method_upper = method.upper()
+
+        if method_upper == "GET":
+            r = await client.get(url, headers=headers)
+        elif method_upper == "POST":
+            r = await client.post(url, headers=headers, json=body or {})
+        elif method_upper == "PATCH":
+            r = await client.patch(url, headers=headers, json=body or {})
+        elif method_upper == "DELETE":
+            r = await client.delete(url, headers=headers)
+        else:
+            return {"success": False, "error": f"Unsupported method: {method}"}
+
+        if r.status_code in [200, 201, 204]:
+            try:
+                return {"success": True, "data": r.json()}
+            except Exception:
+                return {"success": True, "data": []}
+        return {"success": False, "error": r.text}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 async def db_insert_async(
     table: str, data: dict, use_service_key: bool = False
