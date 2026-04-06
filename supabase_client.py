@@ -155,6 +155,25 @@ async def sign_up_async(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+
+async def delete_user_async(user_id: str) -> ApiResponse:
+    """Async: Delete user via Supabase Admin API."""
+    try:
+        client = get_async_client()
+        r = await client.delete(
+            f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+            headers=_headers(use_service_key=True),
+        )
+        if r.status_code in [200, 204]:
+            return {"success": True}
+        try:
+            data = r.json()
+        except Exception:
+            data = r.text
+        return {"success": False, "error": data}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 # Note: Sync auth functions are kept for now if they are used by any sync scripts.
 # They will continue to create their own clients.
 

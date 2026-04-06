@@ -23,7 +23,7 @@ from analytics import track_user_signup as analytics_track_user_signup
 from auth import verify_token
 import database
 from supabase_client import (SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY,
-                             SUPABASE_URL, check_connection,
+                             SUPABASE_URL, check_connection, delete_user_async,
                              get_user_async, shutdown_client,
                              sign_in_async, sign_up_async,
                              startup_client)
@@ -66,8 +66,15 @@ app = FastAPI(
 )
 
 
-async def _ensure_active_group() -> list[str]:
-    active_group_ids = await database.get_active_groups()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+INVITE_FROM_EMAIL = os.getenv(
+    "DUUFY_INVITE_FROM_EMAIL", "Duufy <onboarding@resend.dev>"
+).strip()
+PUBLIC_APP_URL = os.getenv("DUUFY_PUBLIC_APP_URL", "").strip()
+
+
+async def _ensure_active_group(client_id: str = "default") -> list[str]:
+    active_group_ids = await database.get_active_groups(client_id)
     if active_group_ids:
         return active_group_ids
 
@@ -75,12 +82,124 @@ async def _ensure_active_group() -> list[str]:
     if groups:
         first_group_id = groups[0].get("id")
         if first_group_id:
-            await database.set_active_groups([first_group_id])
+            await database.set_active_groups([first_group_id], client_id)
             return [first_group_id]
 
     default_group_id = await database.create_group("Min liste", "")
-    await database.set_active_groups([default_group_id])
+    await database.set_active_groups([default_group_id], client_id)
     return [default_group_id]
+
+
+def _get_client_id(request: Request) -> str:
+    client_id = (request.headers.get("X-Duufy-Client-Id", "") or "").strip()
+    if not client_id:
+        return "default"
+    return client_id[:120]
+
+
+def _user_identifiers(user: dict) -> list[str]:
+    values: list[str] = []
+    for key in ("id", "email"):
+        value = str(user.get(key, "") or "").strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _primary_member_key(user: dict) -> str:
+    email = str(user.get("email", "") or "").strip()
+    if email:
+        return email
+    return str(user.get("id", "") or "").strip()
+
+
+async def _get_accessible_groups_for_user(user: dict) -> list[dict[str, Any]]:
+    return await database.get_accessible_groups(_user_identifiers(user))
+
+
+async def _get_scoped_active_groups(
+    request: Request, user: dict, ensure_one: bool = False
+) -> tuple[list[str], list[dict[str, Any]]]:
+    client_id = _get_client_id(request)
+    accessible_groups = await _get_accessible_groups_for_user(user)
+    accessible_ids = [str(group.get("id", "") or "").strip() for group in accessible_groups]
+    accessible_ids = [group_id for group_id in accessible_ids if group_id]
+
+    active_group_ids = await database.get_active_groups(client_id)
+    filtered_group_ids = [group_id for group_id in active_group_ids if group_id in accessible_ids]
+
+    if not filtered_group_ids and ensure_one and accessible_ids:
+        filtered_group_ids = [accessible_ids[0]]
+
+    if filtered_group_ids != active_group_ids:
+        await database.set_active_groups(filtered_group_ids, client_id)
+
+    return filtered_group_ids, accessible_groups
+
+
+async def _ensure_accessible_active_group(request: Request, user: dict) -> list[str]:
+    group_ids, accessible_groups = await _get_scoped_active_groups(
+        request, user, ensure_one=True
+    )
+    if group_ids:
+        return group_ids
+
+    client_id = _get_client_id(request)
+    owner_id = str(user.get("id", "") or "").strip()
+    group_id = await database.create_group("Min liste", owner_id)
+    member_key = _primary_member_key(user)
+    if member_key:
+        await database.add_member_to_group(group_id, member_key)
+    await database.set_active_groups([group_id], client_id)
+    return [group_id]
+
+
+def _build_public_app_url(request: Request, invite_token: str = "") -> str:
+    base_url = (PUBLIC_APP_URL or str(request.base_url)).rstrip("/")
+    url = f"{base_url}/app"
+    if invite_token:
+        url += f"?invite={invite_token}"
+    return url
+
+
+async def _send_invitation_email(
+    invite_email: str,
+    group_name: str,
+    inviter_name: str,
+    invite_url: str,
+) -> dict[str, Any]:
+    if not RESEND_API_KEY:
+        return {"sent": False, "reason": "missing_api_key"}
+
+    try:
+        import resend
+
+        def _send() -> Any:
+            resend.api_key = RESEND_API_KEY
+            return resend.Emails.send(
+                {
+                    "from": INVITE_FROM_EMAIL,
+                    "to": [invite_email],
+                    "subject": f"{inviter_name} har inviteret dig til Duufy",
+                    "html": (
+                        f"<div style='font-family:Arial,sans-serif;line-height:1.6'>"
+                        f"<h2>Invitation til {escape(group_name)}</h2>"
+                        f"<p>{escape(inviter_name)} har inviteret dig til at dele "
+                        f"indkøbsgruppen <strong>{escape(group_name)}</strong> i Duufy.</p>"
+                        f"<p><a href='{escape(invite_url)}' "
+                        f"style='display:inline-block;padding:12px 18px;border-radius:12px;"
+                        f"background:#ef6f53;color:#fff;text-decoration:none;font-weight:700'>"
+                        f"Åbn invitation</a></p>"
+                        f"<p>Linket åbner appen, hvor du kan logge ind og acceptere gruppen.</p>"
+                        f"</div>"
+                    ),
+                }
+            )
+
+        result = await asyncio.to_thread(_send)
+        return {"sent": True, "result": result}
+    except Exception as exc:
+        return {"sent": False, "error": str(exc)}
 
 
 @app.exception_handler(Exception)
@@ -239,14 +358,17 @@ async def read_root():
         )
     return FileResponse(
         index_path,
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "no-store"},
     )
 
 
 @app.get("/app")
 async def get_app():
     """Returner PWA app"""
-    return FileResponse(Path(__file__).parent / "app.html")
+    return FileResponse(
+        Path(__file__).parent / "app.html",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/manifest.json")
@@ -341,16 +463,35 @@ async def get_config():
 
 
 @app.get("/groups")
-async def list_groups():
-    groups = await database.get_groups()
-    active_group_ids = await database.get_active_groups()
+async def list_groups(request: Request, user: dict = Depends(verify_token)):
+    active_group_ids, groups = await _get_scoped_active_groups(
+        request, user, ensure_one=True
+    )
     return {"groups": groups, "active_groups": active_group_ids}
 
 
 @app.post("/active-groups")
-async def set_active_groups(group_ids: list[str] = Body(...)):
+async def set_active_groups(
+    request: Request, group_ids: list[str] = Body(...), user: dict = Depends(verify_token)
+):
+    client_id = _get_client_id(request)
     clean_ids = [group_id.strip() for group_id in group_ids if group_id and group_id.strip()]
-    ok = await database.set_active_groups(clean_ids)
+    allowed_ids = {
+        str(group.get("id", "") or "").strip()
+        for group in await _get_accessible_groups_for_user(user)
+        if str(group.get("id", "") or "").strip()
+    }
+    if any(group_id not in allowed_ids for group_id in clean_ids):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "GROUP_ACCESS_DENIED",
+                    "message": "You do not have access to one or more groups",
+                }
+            },
+        )
+    ok = await database.set_active_groups(clean_ids, client_id)
     if not ok:
         raise HTTPException(
             status_code=400,
@@ -381,6 +522,11 @@ class SignInRequest(BaseModel):
 class CreateGroupRequest(BaseModel):
     name: str
     owner_id: Optional[str] = None
+
+
+class InviteRequest(BaseModel):
+    email: str
+    group_id: str
 
 
 @app.post("/auth/signup")
@@ -429,7 +575,10 @@ async def auth_me(request: Request):
 
 
 @app.post("/groups/create")
-async def create_group_endpoint(req: CreateGroupRequest):
+async def create_group_endpoint(
+    request: Request, req: CreateGroupRequest, user: dict = Depends(verify_token)
+):
+    client_id = _get_client_id(request)
     group_name = req.name.strip()
     if not group_name:
         raise HTTPException(
@@ -441,10 +590,234 @@ async def create_group_endpoint(req: CreateGroupRequest):
                 }
             },
         )
-
-    group_id = await database.create_group(group_name, req.owner_id or "")
-    await database.set_active_groups([group_id])
+    owner_id = str(user.get("id", "") or "").strip() or req.owner_id or ""
+    group_id = await database.create_group(group_name, owner_id)
+    member_key = _primary_member_key(user)
+    if member_key:
+        await database.add_member_to_group(group_id, member_key)
+    await database.set_active_groups([group_id], client_id)
     return {"success": True, "group_id": group_id}
+
+
+@app.delete("/groups/{group_id}")
+async def delete_group_endpoint(
+    group_id: str, request: Request, user: dict = Depends(verify_token)
+):
+    client_id = _get_client_id(request)
+    group_id = group_id.strip()
+    if not group_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_GROUP_ID",
+                    "message": "Group id is required",
+                }
+            },
+        )
+
+    groups = await database.get_groups()
+    if not any(group.get("id") == group_id for group in groups):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": {
+                    "code": "GROUP_NOT_FOUND",
+                    "message": "Group not found",
+                }
+            },
+        )
+
+    if not await database.user_owns_group(group_id, _user_identifiers(user)):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "GROUP_DELETE_FORBIDDEN",
+                    "message": "Only the group owner can delete this group",
+                }
+            },
+        )
+
+    deleted = await database.delete_group(group_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": {
+                    "code": "DELETE_GROUP_FAILED",
+                    "message": "Could not delete group",
+                }
+            },
+        )
+
+    remaining_groups = await _get_accessible_groups_for_user(user)
+    existing_ids = [group.get("id", "") for group in remaining_groups if group.get("id")]
+    active_group_ids = await database.get_active_groups(client_id)
+    active_group_ids = [gid for gid in active_group_ids if gid and gid != group_id and gid in existing_ids]
+
+    if not active_group_ids and existing_ids:
+        active_group_ids = [existing_ids[0]]
+
+    await database.set_active_groups(active_group_ids, client_id)
+    return {
+        "success": True,
+        "deleted_group_id": group_id,
+        "active_groups": active_group_ids,
+    }
+
+
+@app.post("/invite/send")
+async def send_invitation(
+    request: Request, payload: InviteRequest, user: dict = Depends(verify_token)
+):
+    group_id = payload.group_id.strip()
+    invite_email = payload.email.strip().lower()
+    if not group_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_GROUP_ID", "message": "Group id is required"}},
+        )
+    if "@" not in invite_email or "." not in invite_email:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": {"code": "INVALID_EMAIL", "message": "Email is invalid"}},
+        )
+
+    user_email = str(user.get("email", "") or "").strip().lower()
+    if user_email and invite_email == user_email:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVITE_SELF_FORBIDDEN",
+                    "message": "You are already in this account",
+                }
+            },
+        )
+
+    if not await database.user_has_group_access(group_id, _user_identifiers(user)):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "GROUP_ACCESS_DENIED",
+                    "message": "You do not have access to this group",
+                }
+            },
+        )
+
+    group = next(
+        (entry for entry in await database.get_groups() if entry.get("id") == group_id),
+        None,
+    )
+    if not group:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "GROUP_NOT_FOUND", "message": "Group not found"}},
+        )
+
+    members = [member.lower() for member in await database.get_group_members(group_id)]
+    if invite_email in members:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": {
+                    "code": "ALREADY_MEMBER",
+                    "message": "This email is already a member of the group",
+                }
+            },
+        )
+
+    invitation = await database.create_invitation(
+        group_id=group_id,
+        group_name=str(group.get("name", "") or "Din gruppe").strip(),
+        email=invite_email,
+        inviter_email=user_email,
+        inviter_id=str(user.get("id", "") or "").strip(),
+    )
+    invite_url = _build_public_app_url(request, invitation["token"])
+    email_result = await _send_invitation_email(
+        invite_email=invite_email,
+        group_name=invitation["group_name"],
+        inviter_name=str(user.get("email", "") or "En Duufy-bruger"),
+        invite_url=invite_url,
+    )
+    return {
+        "success": True,
+        "email_sent": email_result.get("sent", False),
+        "invite_url": invite_url,
+        "invitation": invitation,
+    }
+
+
+@app.get("/group/{group_id}/invitations")
+async def get_group_invitations(group_id: str, user: dict = Depends(verify_token)):
+    if not await database.user_has_group_access(group_id, _user_identifiers(user)):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "GROUP_ACCESS_DENIED",
+                    "message": "You do not have access to this group",
+                }
+            },
+        )
+    invitations = await database.list_group_invitations(group_id)
+    return {"invitations": invitations}
+
+
+@app.get("/invite/{token}")
+async def get_invitation(token: str):
+    invitation = await database.get_invitation_by_token(token)
+    if not invitation:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "INVITE_NOT_FOUND", "message": "Invitation not found"}},
+        )
+    return {"success": True, "invitation": invitation}
+
+
+@app.post("/invite/{token}/accept")
+async def accept_invitation(token: str, request: Request, user: dict = Depends(verify_token)):
+    invitation = await database.get_invitation_by_token(token)
+    if not invitation:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": {"code": "INVITE_NOT_FOUND", "message": "Invitation not found"}},
+        )
+    if invitation.get("status") == "expired":
+        raise HTTPException(
+            status_code=410,
+            detail={"error": {"code": "INVITE_EXPIRED", "message": "Invitation has expired"}},
+        )
+
+    user_email = str(user.get("email", "") or "").strip().lower()
+    if not user_email or user_email != str(invitation.get("email", "") or "").strip().lower():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": {
+                    "code": "INVITE_EMAIL_MISMATCH",
+                    "message": "This invitation belongs to another email address",
+                }
+            },
+        )
+
+    accepted = await database.accept_invitation(token, user_email)
+    if not accepted:
+        raise HTTPException(
+            status_code=500,
+            detail={"error": {"code": "INVITE_ACCEPT_FAILED", "message": "Could not accept invitation"}},
+        )
+
+    await database.set_active_groups([str(accepted.get("group_id", "") or "").strip()], _get_client_id(request))
+    return {
+        "success": True,
+        "group_id": accepted.get("group_id"),
+        "group_name": accepted.get("group_name"),
+        "invitation": accepted,
+    }
 
 
 # AI Parser endpoint
@@ -535,7 +908,14 @@ async def _maybe_await(value: Any) -> Any:
 
 
 @app.patch("/items/{item_id}")
-async def patch_item(item_id: str, payload: dict = Body(...)):
+async def patch_item(
+    item_id: str,
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(verify_token),
+):
+    client_id = _get_client_id(request)
+    await _get_scoped_active_groups(request, user, ensure_one=False)
     updates = {k: v for k, v in payload.items() if k in {"name", "quantity"}}
     if not updates:
         raise HTTPException(
@@ -548,7 +928,7 @@ async def patch_item(item_id: str, payload: dict = Body(...)):
             },
         )
 
-    result = await database.patch_item(item_id, updates)
+    result = await database.patch_item(item_id, updates, client_id)
     if result is not None:
         return {"item": result}
 
@@ -574,13 +954,14 @@ class AddItemRequest(BaseModel):
 
 
 class ToggleItemRequest(BaseModel):
-    name: str
+    name: Optional[str] = None
+    item_id: Optional[str] = None
 
 
 @app.get("/items")
-async def list_items():
+async def list_items(request: Request, user: dict = Depends(verify_token)):
     """Get all items across active groups."""
-    group_ids = await database.get_active_groups()
+    group_ids, _ = await _get_scoped_active_groups(request, user, ensure_one=True)
     all_items = []
     for gid in group_ids:
         items = await database.get_group_items(gid)
@@ -588,27 +969,34 @@ async def list_items():
     # Return flat array matching frontend expectations
     return [
         {
+            "id": item.get("id", ""),
             "name": item.get("name", ""),
             "quantity": item.get("quantity", ""),
             "unit": item.get("unit", ""),
+            "category": item.get("category", ""),
             "checked": item.get("checked", False),
             "image_url": item.get("image_url"),
+            "created_at": item.get("created_at"),
         }
         for item in all_items
     ]
 
 
 @app.post("/items")
-async def add_item(req: AddItemRequest):
+async def add_item(
+    request: Request, req: AddItemRequest, user: dict = Depends(verify_token)
+):
     """Add an item to active groups."""
-    await _ensure_active_group()
+    client_id = _get_client_id(request)
+    await _ensure_accessible_active_group(request, user)
     item_data = {
         "name": req.item.strip(),
         "quantity": req.quantity or "",
         "unit": req.unit,
         "category": req.category,
+        "added_by": _primary_member_key(user),
     }
-    result = await database.add_item_to_groups(item_data)
+    result = await database.add_item_to_groups(item_data, client_id=client_id)
     if result:
         return {"success": True}
     return JSONResponse(
@@ -618,19 +1006,75 @@ async def add_item(req: AddItemRequest):
 
 
 @app.post("/items/toggle")
-async def toggle_item(req: ToggleItemRequest):
-    """Toggle checked state for an item by name."""
-    toggled = await database.toggle_item_by_name(req.name)
+async def toggle_item(
+    request: Request, req: ToggleItemRequest, user: dict = Depends(verify_token)
+):
+    """Toggle checked state for an item by id when possible."""
+    client_id = _get_client_id(request)
+    await _get_scoped_active_groups(request, user, ensure_one=False)
+    toggled = await database.toggle_item(req.item_id, req.name, client_id)
     return {"success": toggled}
 
 
+@app.delete("/items/id/{item_id}")
+async def delete_item_by_id(
+    item_id: str, request: Request, user: dict = Depends(verify_token)
+):
+    """Delete an item by id within active groups."""
+    client_id = _get_client_id(request)
+    await _get_scoped_active_groups(request, user, ensure_one=False)
+    deleted = await database.delete_item_by_id(item_id, client_id)
+    if deleted:
+        return {"success": True}
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "error": {
+                "code": "ITEM_NOT_FOUND",
+                "message": "Item not found in active groups",
+            }
+        },
+    )
+
+
 @app.delete("/items/{item_name}")
-async def delete_item_by_name(item_name: str):
+async def delete_item_by_name(
+    item_name: str, request: Request, user: dict = Depends(verify_token)
+):
     """Delete an item by name from all active groups."""
-    group_ids = await database.get_active_groups()
+    group_ids, _ = await _get_scoped_active_groups(request, user, ensure_one=False)
     for gid in group_ids:
         await database.delete_item_from_group(gid, item_name)
     return {"success": True}
+
+
+@app.delete("/auth/account")
+async def delete_account(user: dict = Depends(verify_token)):
+    user_id = str(user.get("id", "")).strip()
+    if not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": {
+                    "code": "INVALID_USER",
+                    "message": "Could not resolve current user",
+                }
+            },
+        )
+
+    result = await delete_user_async(user_id)
+    if result.get("success"):
+        return {"success": True}
+
+    raise HTTPException(
+        status_code=500,
+        detail={
+            "error": {
+                "code": "DELETE_ACCOUNT_FAILED",
+                "message": "Could not delete account",
+            }
+        },
+    )
 
 
 # ========== SIGNUP / ONBOARDING ENDPOINT ==========
