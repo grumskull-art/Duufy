@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from html import escape
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -71,6 +72,53 @@ INVITE_FROM_EMAIL = os.getenv(
     "DUUFY_INVITE_FROM_EMAIL", "Duufy <onboarding@resend.dev>"
 ).strip()
 PUBLIC_APP_URL = os.getenv("DUUFY_PUBLIC_APP_URL", "").strip()
+
+
+def _normalize_origin(value: str) -> str:
+    raw = str(value or "").strip().rstrip("/")
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return raw
+
+
+def _allowed_origins() -> list[str]:
+    configured = [
+        _normalize_origin(origin)
+        for origin in os.getenv(
+            "ALLOWED_ORIGINS",
+            (
+                "http://localhost:3000,"
+                "http://localhost:5173,"
+                "http://localhost:8000,"
+                "http://127.0.0.1:8000,"
+                "capacitor://localhost,"
+                "ionic://localhost"
+            ),
+        ).split(",")
+    ]
+    if PUBLIC_APP_URL:
+        configured.append(_normalize_origin(PUBLIC_APP_URL))
+
+    seen: set[str] = set()
+    origins: list[str] = []
+    for origin in configured:
+        if not origin or origin in seen:
+            continue
+        seen.add(origin)
+        origins.append(origin)
+    return origins
+
+
+def _runtime_warnings() -> list[str]:
+    warnings: list[str] = []
+    if not PUBLIC_APP_URL:
+        warnings.append("DUUFY_PUBLIC_APP_URL is not set; invite links fall back to request URL")
+    if not RESEND_API_KEY:
+        warnings.append("RESEND_API_KEY is not set; invite emails fall back to copyable links")
+    return warnings
 
 
 async def _ensure_active_group(client_id: str = "default") -> list[str]:
@@ -328,10 +376,7 @@ async def track_errors_and_performance(request: Request, call_next):
 # Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        origin.strip() for origin in os.getenv(
-            "ALLOWED_ORIGINS",
-            "http://localhost:3000").split(",") if origin.strip()],
+    allow_origins=_allowed_origins(),
     allow_credentials=True,
     allow_methods=[
         "GET",
@@ -412,6 +457,7 @@ async def get_service_worker():
 @app.get("/health")
 async def health_check():
     """Perform a live health check of the service and its dependencies."""
+    warnings = _runtime_warnings()
     if not getattr(app.state, "supabase_enabled", False):
         return {
             "status": "degraded",
@@ -419,8 +465,13 @@ async def health_check():
                 "database": {
                     "status": "disabled",
                     "details": "Supabase not configured in environment",
+                },
+                "email": {
+                    "status": "ok" if RESEND_API_KEY else "degraded",
+                    "details": "Resend configured" if RESEND_API_KEY else "Invite emails disabled",
                 }
             },
+            "warnings": warnings,
             "time": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -442,8 +493,13 @@ async def health_check():
             "database": {
                 "status": "ok",
                 "details": supabase_status,
+            },
+            "email": {
+                "status": "ok" if RESEND_API_KEY else "degraded",
+                "details": "Resend configured" if RESEND_API_KEY else "Invite emails disabled",
             }
         },
+        "warnings": warnings,
         "time": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -459,6 +515,8 @@ async def get_config():
     return {
         "supabase_url": SUPABASE_URL or "",
         "supabase_anon_key": SUPABASE_ANON_KEY or "",
+        "public_app_url": _normalize_origin(PUBLIC_APP_URL) or "",
+        "invite_email_enabled": bool(RESEND_API_KEY),
     }
 
 
