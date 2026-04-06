@@ -3,7 +3,7 @@ import os
 import time
 import traceback
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from html import escape
 from typing import Any, Optional
@@ -421,7 +421,7 @@ async def health_check():
                     "details": "Supabase not configured in environment",
                 }
             },
-            "time": datetime.utcnow().isoformat(),
+            "time": datetime.now(timezone.utc).isoformat(),
         }
 
     # Check Supabase connection (run sync function in thread to avoid blocking)
@@ -444,7 +444,7 @@ async def health_check():
                 "details": supabase_status,
             }
         },
-        "time": datetime.utcnow().isoformat(),
+        "time": datetime.now(timezone.utc).isoformat(),
     }
 
 

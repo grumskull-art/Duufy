@@ -6,7 +6,7 @@ import logging
 import secrets
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 from uuid import uuid4
@@ -264,7 +264,7 @@ def _get_backend() -> str:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ----------------------------
@@ -983,7 +983,7 @@ def _invitation_status(invitation: Dict[str, Any], now: Optional[datetime] = Non
     except ValueError:
         return status
 
-    if expires_on <= (now or datetime.utcnow()):
+    if expires_on <= (now or datetime.now(timezone.utc)):
         return "expired"
     return status
 
@@ -1056,7 +1056,7 @@ async def create_invitation(
 ) -> Dict[str, Any]:
     invitations = await load_invitations()
     email_key = _normalize_identity(email)
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     changed = False
 
     for invitation in invitations:
@@ -1152,7 +1152,7 @@ async def accept_invitation(token: str, member_name: str) -> Optional[Dict[str, 
 
         await add_member_to_group(str(invitation.get("group_id", "")), member_name)
         invitation["status"] = "accepted"
-        invitation["accepted_at"] = datetime.utcnow().isoformat()
+        invitation["accepted_at"] = datetime.now(timezone.utc).isoformat()
         invitation["accepted_by"] = member_name
         await save_invitations(invitations)
         return _public_invitation(invitation)
